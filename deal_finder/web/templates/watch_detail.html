@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ w.name }} · Deal Finder{% endblock %}
+{% block body %}
+<hgroup>
+  <h2>{{ w.name }}
+    {% if w.active %}<span class="pill on">watching</span>{% else %}<span class="pill off">stopped</span>{% endif %}
+  </h2>
+  <p class="muted">{{ w.search_params.get('make','') }} {{ w.search_params.get('model','') }} ·
+    {{ w.schedule_kind }} <code>{{ w.schedule_value }}</code> ·
+    next run: {{ next_run.strftime('%Y-%m-%d %H:%M UTC') if next_run else '—' }}</p>
+</hgroup>
+
+<div class="action-bar">
+  <form method="post" action="/watches/{{ w.id }}/{{ 'stop' if w.active else 'start' }}" style="margin:0;">
+    <button type="submit" class="{{ 'secondary' if w.active else 'contrast' }}">{{ 'Stop watching' if w.active else 'Start watching' }}</button>
+  </form>
+  <a href="/watches/{{ w.id }}/edit" role="button" class="secondary outline">Edit</a>
+  <form method="post" action="/watches/{{ w.id }}/delete" style="margin:0;" onsubmit="return confirm('Delete this watch and its history?');">
+    <button type="submit" class="secondary outline" style="color:#b3261e; border-color:#b3261e;">Delete</button>
+  </form>
+</div>
+
+<div class="panel">
+  <form id="run-now-form" method="post" action="/watches/{{ w.id }}/run-now">
+    <button type="submit">Run now</button>
+  </form>
+  <label class="check-row">
+    <span class="check-row-main"><input type="checkbox" name="send_email" form="run-now-form"> Send test email</span>
+  </label>
+  <label class="check-row">
+    <span class="check-row-main"><input type="checkbox" name="dry_run" form="run-now-form"> Dry run</span>
+    <small class="check-row-hint">Opens matches in new browser tabs instead of emailing.</small>
+  </label>
+</div>
+
+{% if run_result %}
+<article style="margin-top:1rem;">
+  <header><strong>Run result (test)</strong></header>
+  <p>Found {{ run_result.found }} · matched {{ run_result.matched }} · new {{ run_result.new }}
+     {% if run_result.emailed %}· ✅ emailed {{ run_result.notified }}{% endif %}
+     {% if run_result.dry_run %}· 🌐 opened {{ run_result.opened }} tab(s) in your browser{% endif %}
+     {% if run_result.seeded %}· seeded (no email on first run){% endif %}</p>
+  {% if run_result.error %}<p class="note">{{ run_result.error }}</p>{% endif %}
+  <details open>
+    <summary>Adapter status</summary>
+    <ul>{% for k, v in run_result.adapter_status.items() %}<li><strong>{{ k }}</strong>: {{ v }}</li>{% endfor %}</ul>
+  </details>
+  {% if run_result.matches_preview %}
+  <table class="sortable">
+    <thead><tr>
+      <th>Title</th>
+      <th data-sort-type="number">Price</th>
+      <th data-sort-type="number">Year</th>
+      <th data-sort-type="number">km</th>
+      <th>Location</th>
+      <th>Source</th>
+    </tr></thead>
+    <tbody>
+    {% for m in run_result.matches_preview %}
+      <tr>
+        <td><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title }}</a></td>
+        <td data-sort="{{ m.price if m.price is not none else '' }}">{{ "%.0f"|format(m.price) ~ ' ' ~ m.currency if m.price else '—' }}</td>
+        <td data-sort="{{ m.year if m.year is not none else '' }}">{{ m.year or '—' }}</td>
+        <td data-sort="{{ m.mileage_km if m.mileage_km is not none else '' }}">{{ m.mileage_km or '—' }}</td>
+        <td>{{ m.location or '—' }}</td><td>{{ m.marketplace }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</article>
+{% endif %}
+
+<h3 style="margin-top:1.5rem;">Recent matches ({{ matches|length }})</h3>
+{% if matches %}
+<table>
+  <thead><tr><th>First seen</th><th>Title</th><th>Price</th><th>Source</th><th>Emailed?</th></tr></thead>
+  <tbody>
+  {% for m in matches %}
+    <tr>
+      <td><small>{{ m.first_seen_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+      <td><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title }}</a></td>
+      <td>{{ "%.0f"|format(m.price) if m.price else '—' }}</td>
+      <td>{{ m.marketplace }}</td>
+      <td>{{ '✅' if m.notified else '—' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No matches recorded yet.</p>{% endif %}
+
+<h3 style="margin-top:1.5rem;">Email log</h3>
+{% if logs %}
+<table>
+  <thead><tr><th>Time</th><th>To</th><th>Subject</th><th>#</th><th>Result</th></tr></thead>
+  <tbody>
+  {% for l in logs %}
+    <tr>
+      <td><small>{{ l.sent_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+      <td><small>{{ l.email_to }}</small></td><td><small>{{ l.subject }}</small></td>
+      <td>{{ l.num_matches }}</td>
+      <td>{% if l.success %}✅{% else %}❌ <small class="muted">{{ l.error }}</small>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No emails sent yet.</p>{% endif %}
+{% endblock %}

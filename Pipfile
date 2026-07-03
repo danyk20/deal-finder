@@ -1,0 +1,29 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+# Runtime dependencies come from pyproject.toml via an editable install of this package.
+# "browser" pulls in Playwright (used to drive real Chrome for tutti/Ricardo scraping).
+# "facebook" pulls in facebook-marketplace-scraper (its own dedicated browser + login flow).
+[packages]
+deal-finder = {editable = true, path = ".", extras = ["browser", "facebook"]}
+# patchright: patched Playwright that evades Cloudflare/Turnstile bot-detection.
+# Listed explicitly so pipenv locks it (editable-extra transitive deps aren't captured).
+patchright = ">=1.40"
+
+[dev-packages]
+pytest = ">=8"
+respx = ">=0.21"
+
+[requires]
+python_version = "3.13"
+
+# Convenience: `pipenv run <name>`
+[scripts]
+dev = "uvicorn deal_finder.main:app --reload"
+start = "uvicorn deal_finder.main:app --host 127.0.0.1 --port 8000"
+test = "pytest -q"
+browsers = "patchright install chrome"
+fb-login = "python -m deal_finder.browser.fb_login"
+solve = "python -m deal_finder.browser.solve"

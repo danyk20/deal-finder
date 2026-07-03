@@ -1,0 +1,378 @@
+[
+  {
+    "availableForExchange": null,
+    "availableForLeasing": null,
+    "axis": null,
+    "batteryCapacity": 90.0,
+    "batteryCertificateKey": null,
+    "batteryCertificateName": null,
+    "batteryHealthPercentage": null,
+    "bodyColor": "black",
+    "bodyType": "saloon",
+    "boot": {
+      "height": null,
+      "length": null,
+      "volume": null,
+      "width": null
+    },
+    "certificationNumber": null,
+    "chargingPlugType": "type-2",
+    "chargingPower": 11.0,
+    "chargingTime0To100": null,
+    "chargingTime0To80": null,
+    "co2Emission": null,
+    "combustionEngineHorsePower": null,
+    "conditionType": "used",
+    "consumption": {
+      "combined": null,
+      "extraUrban": null,
+      "urban": null
+    },
+    "createdDate": "2026-07-02T10:52:42.486Z",
+    "cubicCapacity": null,
+    "cylinderArrangement": null,
+    "cylinders": null,
+    "description": "FREE SUPERCHARGER / FREE PREMIUMCONNECTIVITY auf dem Fahrzeug vorhanden, Batterie-Leistung aufgrund des Fahrzeugalters dezimiert, bei 100 Prozent Ladung wird 397 KM (WLTP) angezeigt / Adapter für CCS Supercharger vorhanden (Ladeleistung 118 KW möglich) 21-Zoll-Felgen mit 8fach Bereifung (Sommer/Winter), Felgen haben diverse oberflächliche Beschädigungen, 19-Zoll Felgen silbrig vorhanden (Bereifung muss ersetzt werden/diverse oberflächliche Beschädigungen), Lackierung hat diverse kleinere Beschädigungen, Fensterheber-Motor vorne recht/hinten links/hinten rechts funktioniert nicht korrekt (muss gemäss Tesla ersetzt werden) Dachträger silbrig (nicht von Tesla) vorhanden, Sonderausstattung siehe Auflistung Bilder",
+    "directImport": false,
+    "documents": [],
+    "doors": 5,
+    "driveSystem": null,
+    "driveType": "all",
+    "electricMotorHorsePower": 524,
+    "emissionStandard": null,
+    "energyLabel": null,
+    "fastChargingPlugType": "supercharger",
+    "fastChargingPower": 90.0,
+    "fastChargingTime0To100": null,
+    "fastChargingTime0To80": 42,
+    "features": [
+      {
+        "feature": "top-list"
+      }
+    ],
+    "financing": {
+      "providerName": "FinanceScout24",
+      "url": "https://kredit.financescout24.ch/de/inquiry/amount?vehicleId=20599682&amount=18000.00"
+    },
+    "firstRegistrationDate": "2015-12-01",
+    "firstRegistrationYear": 2015,
+    "fuelType": "electric",
+    "furnitureTransporter": null,
+    "gears": 1,
+    "hadAccident": false,
+    "hasAdditionalSetOfTires": true,
+    "hasCrane": null,
+    "hasNewTires": null,
+    "hasTailLift": null,
+    "hasTarpaulin": null,
+    "hasWinch": null,
+    "handicappedAccessible": false,
+    "height": null,
+    "horsePower": 524,
+    "id": 20599682,
+    "images": [
+      {
+        "key": "listing/682/20599682/1599635233.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/374502023.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/2075282026.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/1495928519.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/819855184.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/81114936.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/1482953735.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/255124665.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/1791112157.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/1518630293.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/102062015.jpeg"
+      },
+      {
+        "key": "listing/682/20599682/1914856528.jpeg"
+      }
+    ],
+    "inspected": false,
+    "insurance": {
+      "providerName": "FinanceScout24",
+      "url": "https://www.financescout24.ch/de/autoversicherung-finden?vehicleId=20599682"
+    },
+    "interiorColor": "beige",
+    "kiloWatts": 386,
+    "lastInspectionDate": "2025-01-28",
+    "lastModifiedDate": "2026-07-02T12:58:15.04Z",
+    "leasing": null,
+    "length": null,
+    "licenseCategory": null,
+    "listPrice": 110000.0,
+    "make": {
+      "id": 391,
+      "key": "tesla",
+      "name": "TESLA"
+    },
+    "metallic": false,
+    "mileage": 175000,
+    "model": {
+      "id": 1919,
+      "key": "model-s",
+      "name": "MODEL S"
+    },
+    "payload": null,
+    "powerConsumption": null,
+    "previousPrice": null,
+    "price": 18000.0,
+    "racingVehicle": false,
+    "qualiLogoId": null,
+    "range": 397,
+    "refrigerator": null,
+    "schoolBus": null,
+    "seats": 5,
+    "sellerId": 3139328,
+    "sellerVehicleId": null,
+    "sleepingBerths": null,
+    "status": "activated",
+    "teaser": "FREESUPERCHARGER/PREMIUMCONNECTIVITY",
+    "towingCapacityBraked": null,
+    "transmissionType": "semi-automatic",
+    "transmissionTypeGroup": "automatic",
+    "transporter": null,
+    "tuned": false,
+    "vehicleCategory": "car",
+    "vehicleIdentificationNumber": null,
+    "versionFullName": "90 D",
+    "video": null,
+    "warranty": {
+      "details": null,
+      "duration": null,
+      "mileage": null,
+      "startDate": null,
+      "type": "none"
+    },
+    "weightCurb": 2184,
+    "weightTotal": 2640,
+    "width": null,
+    "seller": {
+      "city": "Lindau",
+      "features": [],
+      "id": 3139328,
+      "logoKey": null,
+      "name": "Claudio",
+      "type": "private",
+      "zipCode": "8312"
+    },
+    "url": "https://www.autoscout24.ch/de/d/20599682"
+  },
+  {
+    "availableForExchange": null,
+    "availableForLeasing": null,
+    "axis": null,
+    "batteryCapacity": 100.0,
+    "batteryCertificateKey": null,
+    "batteryCertificateName": null,
+    "batteryHealthPercentage": null,
+    "bodyColor": "black",
+    "bodyType": "saloon",
+    "boot": {
+      "height": null,
+      "length": null,
+      "volume": null,
+      "width": null
+    },
+    "certificationNumber": "1TD562",
+    "chargingPlugType": null,
+    "chargingPower": null,
+    "chargingTime0To100": null,
+    "chargingTime0To80": null,
+    "co2Emission": null,
+    "combustionEngineHorsePower": null,
+    "conditionType": "used",
+    "consumption": {
+      "combined": null,
+      "extraUrban": null,
+      "urban": null
+    },
+    "createdDate": "2026-07-02T08:46:46.502Z",
+    "cubicCapacity": null,
+    "cylinderArrangement": null,
+    "cylinders": null,
+    "description": "CH FAHRZEUG 1 VORBESITZER UNFALLFREI TOP ZUSTAND PANORAMA DACH 8 FACH BEREIFT MFK 04/26",
+    "directImport": false,
+    "documents": [],
+    "doors": 5,
+    "driveSystem": null,
+    "driveType": "all",
+    "electricMotorHorsePower": 525,
+    "emissionStandard": null,
+    "energyLabel": "a",
+    "fastChargingPlugType": null,
+    "fastChargingPower": null,
+    "fastChargingTime0To100": null,
+    "fastChargingTime0To80": null,
+    "features": [],
+    "financing": {
+      "providerName": "FinanceScout24",
+      "url": "https://kredit.financescout24.ch/de/inquiry/amount?vehicleId=20599224&amount=21990.00"
+    },
+    "firstRegistrationDate": "2019-06-01",
+    "firstRegistrationYear": 2019,
+    "fuelType": "electric",
+    "furnitureTransporter": null,
+    "gears": 1,
+    "hadAccident": false,
+    "hasAdditionalSetOfTires": true,
+    "hasCrane": null,
+    "hasNewTires": null,
+    "hasTailLift": null,
+    "hasTarpaulin": null,
+    "hasWinch": null,
+    "handicappedAccessible": false,
+    "height": 1445,
+    "horsePower": 525,
+    "id": 20599224,
+    "images": [
+      {
+        "key": "listing/224/20599224/8033097.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/1767687656.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/479601604.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/1198200970.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/1948875755.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/1914036930.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/889586466.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/408274540.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/1307051039.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/989168597.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/755303180.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/2039245506.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/212934601.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/2096134765.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/789729760.jpeg"
+      },
+      {
+        "key": "listing/224/20599224/192970659.jpeg"
+      }
+    ],
+    "inspected": true,
+    "insurance": {
+      "providerName": "FinanceScout24",
+      "url": "https://www.financescout24.ch/de/autoversicherung-finden?vehicleId=20599224"
+    },
+    "interiorColor": "black",
+    "kiloWatts": 386,
+    "lastInspectionDate": "2026-04-09",
+    "lastModifiedDate": "2026-07-02T09:07:00.12Z",
+    "leasing": null,
+    "length": 4979,
+    "licenseCategory": "b",
+    "listPrice": 106100.0,
+    "make": {
+      "id": 391,
+      "key": "tesla",
+      "name": "TESLA"
+    },
+    "metallic": true,
+    "mileage": 150000,
+    "model": {
+      "id": 1919,
+      "key": "model-s",
+      "name": "MODEL S"
+    },
+    "payload": 404,
+    "powerConsumption": 18.9,
+    "previousPrice": null,
+    "price": 21990.0,
+    "racingVehicle": false,
+    "qualiLogoId": null,
+    "range": null,
+    "refrigerator": null,
+    "schoolBus": null,
+    "seats": 5,
+    "sellerId": 67910,
+    "sellerVehicleId": null,
+    "sleepingBerths": null,
+    "status": "activated",
+    "teaser": "CH FAHRZEUG 1 VORBESITZER UNFALLFREI TOP ZUSTAND PANORAMA DACH 8 FACH BEREIFT MFK 04/26",
+    "towingCapacityBraked": null,
+    "transmissionType": "automatic",
+    "transmissionTypeGroup": "automatic",
+    "transporter": null,
+    "tuned": false,
+    "vehicleCategory": "car",
+    "vehicleIdentificationNumber": null,
+    "versionFullName": "Model S 100 D",
+    "video": null,
+    "warranty": {
+      "details": null,
+      "duration": 92,
+      "mileage": 192000,
+      "startDate": null,
+      "type": "from-first-registration"
+    },
+    "weightCurb": 2316,
+    "weightTotal": 2720,
+    "width": 1964,
+    "seller": {
+      "city": "Basel",
+      "features": [
+        {
+          "feature": "test-drive"
+        },
+        {
+          "feature": "list"
+        },
+        {
+          "feature": "listing-visibility-basic"
+        }
+      ],
+      "id": 67910,
+      "logoKey": null,
+      "name": "Autogalerie Tarin",
+      "type": "professional",
+      "zipCode": "4053"
+    },
+    "url": "https://www.autoscout24.ch/de/d/20599224"
+  }
+]

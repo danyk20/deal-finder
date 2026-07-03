@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if watch else 'New' }} watch · Deal Finder{% endblock %}
+{% block body %}
+<h2>{{ 'Edit watch' if watch else 'New watch' }}</h2>
+
+<form method="post" action="{{ '/watches/' ~ watch.id if watch else '/watches' }}">
+  <label>Name
+    <input type="text" name="name" value="{{ watch.name if watch else '' }}" placeholder="Tesla Model S under 40k in Zürich" required>
+  </label>
+
+  <input type="hidden" name="category" value="{{ category.key }}">
+  <p class="muted">Category: <strong>{{ category.label }}</strong></p>
+
+  <h4>What to search for</h4>
+  <div class="grid-2">
+    {% for f in category.search_param_fields %}
+    <label>{{ f.label }}
+      <input type="{{ 'number' if f.kind == 'number' else 'text' }}" name="sp_{{ f.name }}"
+             value="{{ (watch.search_params.get(f.name, '') if watch else '') }}" placeholder="{{ f.placeholder }}">
+    </label>
+    {% endfor %}
+  </div>
+
+  <h4>Filters</h4>
+  <div class="grid-2">
+    {% for f in category.filter_fields %}
+    <label>{{ f.label }}
+      <input type="{{ 'number' if f.kind == 'number' else 'text' }}" name="f_{{ f.name }}"
+             value="{{ (watch.filters.get(f.name, '') if watch else '') }}" placeholder="{{ f.placeholder }}">
+      {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}
+    </label>
+    {% endfor %}
+  </div>
+
+  <h4>Marketplaces</h4>
+  <fieldset>
+    {% for a in adapters %}
+    <label class="check-row">
+      <span class="check-row-main"><input type="checkbox" name="marketplaces" value="{{ a.key }}" {{ 'checked' if a.key in selected_mkt else '' }}> {{ a.label }}</span>
+      {% if a.status_note %}<small class="check-row-hint">{{ a.status_note }}</small>{% endif %}
+    </label>
+    {% endfor %}
+  </fieldset>
+
+  <h4>Schedule</h4>
+  <div class="grid-2">
+    <label>Type
+      <select name="schedule_kind">
+        <option value="interval" {{ 'selected' if not watch or watch.schedule_kind == 'interval' else '' }}>Every (interval)</option>
+        <option value="cron" {{ 'selected' if watch and watch.schedule_kind == 'cron' else '' }}>Cron expression</option>
+      </select>
+    </label>
+    <label>Value
+      <input type="text" name="schedule_value" value="{{ watch.schedule_value if watch else '1d' }}" placeholder="15m / 2h / 1d / 1w  or  0 8 * * *">
+      <small class="muted">Interval: 15m, 2h, 1d, 1w (min 60s). Cron: 5 fields, e.g. <code>0 8 * * *</code> = daily 08:00 UTC.</small>
+    </label>
+  </div>
+
+  <h4>Notification</h4>
+  <label>Email address for matches
+    <input type="email" name="notify_email" value="{{ default_email }}" placeholder="you@example.com">
+  </label>
+
+  <label>Questions for the AI (one per line) — answered from each listing's text
+    <textarea name="questions" rows="6">{{ questions_text }}</textarea>
+  </label>
+
+  <div style="display:flex; gap:1rem;">
+    <button type="submit">{{ 'Save changes' if watch else 'Create watch' }}</button>
+    <a href="{{ '/watches/' ~ watch.id if watch else '/' }}" role="button" class="secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

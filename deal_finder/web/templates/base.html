@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Deal Finder{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    :root { --pico-font-size: 95%; }
+    body > main { padding-top: 1rem; }
+    .muted { color: var(--pico-muted-color); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; }
+    .pill.on { background:#d8f5dd; color:#1a7f37; }
+    .pill.off { background:#eee; color:#666; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:0 1rem; }
+    table { font-size: 14px; }
+    nav .brand { font-weight:700; }
+    .note { background:#fff8e1; border-left:3px solid #f0ad4e; padding:8px 12px; border-radius:4px; }
+    /* Pico buttons/role=button links default to width:100%, which looks fine standalone
+       but stretches badly in a horizontal row of actions — keep them their natural size there. */
+    .action-bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    .action-bar button, .action-bar [role="button"] { width:auto; margin:0; }
+
+    /* A checkbox row with an optional secondary description line beneath it. One <label>
+       per row keeps the whole row clickable; wrapping all text in .check-row-main / a
+       trailing <small> (never a bare text node) is what keeps this from ever overlapping
+       or line-wrapping mid-word, regardless of Pico's own checkbox/label styling. */
+    .check-row { display:block; margin-bottom:.6rem; cursor:pointer; }
+    .check-row:last-child { margin-bottom:0; }
+    .check-row .check-row-main { display:flex; align-items:center; gap:.55rem; }
+    .check-row input[type="checkbox"] { margin:0; flex-shrink:0; }
+    .check-row-hint { display:block; margin:.15rem 0 0 1.7rem; color:var(--pico-muted-color); font-size:.85em; }
+
+    /* A small card for grouping a primary action with the checkboxes that modify it. */
+    .panel { margin-top:.75rem; padding:1rem 1.1rem; max-width:26rem;
+             background:var(--pico-code-background-color); border:1px solid var(--pico-muted-border-color);
+             border-radius:var(--pico-border-radius); }
+    .panel > form { margin:0 0 .85rem; }
+    .panel button { width:auto; margin:0; }
+
+    /* Click-to-sort table headers (table.sortable — see the script at the end of body). */
+    table.sortable th { cursor:pointer; user-select:none; white-space:nowrap; }
+    table.sortable th:hover { color: var(--pico-primary); }
+    table.sortable th .sort-arrow { display:inline-block; width:.9em; margin-left:.1rem; color: var(--pico-primary); font-size:.8em; }
+  </style>
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul><li class="brand"><a href="/" style="text-decoration:none;">🔍 Deal Finder</a></li></ul>
+      <ul>
+        <li><a href="/">Watches</a></li>
+        <li><a href="/watches/new">+ New watch</a></li>
+        <li><a href="/settings">Settings</a></li>
+        <li><a href="/docs">API</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main class="container">
+    {% block body %}{% endblock %}
+  </main>
+  <script>
+    // Click-to-sort for any <table class="sortable">. Add data-sort-type="number" on a
+    // <th> for numeric columns (default is text). A <td> may set data-sort="<raw value>"
+    // to sort by something other than its displayed text (e.g. the unformatted number
+    // behind "13'000 CHF"); missing values (empty data-sort, or "—") always sort last.
+    function initSortableTables() {
+      document.querySelectorAll('table.sortable').forEach((table) => {
+        const headRow = table.tHead && table.tHead.rows[0];
+        if (!headRow) return;
+        Array.from(headRow.cells).forEach((th, colIndex) => {
+          const label = document.createElement('span');
+          label.textContent = th.textContent;
+          const arrow = document.createElement('span');
+          arrow.className = 'sort-arrow';
+          th.textContent = '';
+          th.append(label, arrow);
+          th.addEventListener('click', () => sortTableByColumn(table, colIndex, th));
+        });
+      });
+    }
+
+    function sortTableByColumn(table, colIndex, th) {
+      const tbody = table.tBodies[0];
+      if (!tbody) return;
+      const asc = th.getAttribute('data-sort-dir') !== 'asc';
+      const isNumber = th.getAttribute('data-sort-type') === 'number';
+
+      const valueOf = (row) => {
+        const cell = row.cells[colIndex];
+        const raw = cell.hasAttribute('data-sort') ? cell.getAttribute('data-sort') : cell.textContent.trim();
+        if (isNumber) {
+          const n = parseFloat(raw);
+          return raw === '' || Number.isNaN(n) ? null : n;
+        }
+        return raw === '' || raw === '—' ? null : raw.toLowerCase();
+      };
+
+      const rows = Array.from(tbody.rows).sort((a, b) => {
+        const va = valueOf(a), vb = valueOf(b);
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1;   // missing values always sort last
+        if (vb === null) return -1;
+        if (va < vb) return asc ? -1 : 1;
+        if (va > vb) return asc ? 1 : -1;
+        return 0;
+      });
+      rows.forEach((row) => tbody.appendChild(row));
+
+      Array.from(th.parentElement.cells).forEach((h) => {
+        h.removeAttribute('data-sort-dir');
+        h.querySelector('.sort-arrow').textContent = '';
+      });
+      th.setAttribute('data-sort-dir', asc ? 'asc' : 'desc');
+      th.querySelector('.sort-arrow').textContent = asc ? '▲' : '▼';
+    }
+
+    document.addEventListener('DOMContentLoaded', initSortableTables);
+  </script>
+</body>
+</html>

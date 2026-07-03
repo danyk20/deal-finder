@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Settings · Deal Finder{% endblock %}
+{% block body %}
+<h2>Settings</h2>
+<p class="muted">These override the values from your <code>.env</code> file and are stored in the database.</p>
+
+<form method="post" action="/settings">
+  <h4>Email (SMTP)</h4>
+  <div class="grid-2">
+    <label>SMTP host<input type="text" name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.gmail.com"></label>
+    <label>SMTP port<input type="number" name="smtp_port" value="{{ values.smtp_port }}"></label>
+    <label>SMTP user<input type="text" name="smtp_user" value="{{ values.smtp_user }}"></label>
+    <label>SMTP password<input type="password" name="smtp_password" value="{{ '********' if values.smtp_password else '' }}"></label>
+    <label>From address<input type="text" name="smtp_from" value="{{ values.smtp_from }}"></label>
+    <label style="align-self:end;"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls else '' }}> Use STARTTLS</label>
+  </div>
+  <label>Default email for new watches<input type="email" name="default_notify_email" value="{{ values.default_notify_email }}"></label>
+
+  <h4>Local AI (Ollama)</h4>
+  <label><input type="checkbox" name="ai_enabled" {{ 'checked' if values.ai_enabled else '' }}> Enable AI translation &amp; Q&amp;A</label>
+  <div class="grid-2">
+    <label>Ollama base URL<input type="text" name="ollama_base_url" value="{{ values.ollama_base_url }}"></label>
+    <label>Model<input type="text" name="ollama_model" value="{{ values.ollama_model }}" placeholder="gemma3:4b"></label>
+  </div>
+  <small class="muted">Run <code>ollama serve</code> and <code>ollama pull {{ values.ollama_model or 'gemma3:4b' }}</code>. Verify the tag with <code>ollama list</code>.</small>
+
+  <h4>Behaviour</h4>
+  <div class="grid-2">
+    <label>Max matches emailed per run<input type="number" name="max_results_per_run" value="{{ values.max_results_per_run }}"></label>
+    <label style="align-self:end;"><input type="checkbox" name="seed_mode" {{ 'checked' if values.seed_mode else '' }}> Seed mode (don't email pre-existing listings on a watch's first run)</label>
+  </div>
+
+  <h4>Browser (marketplace scanning)</h4>
+  <p class="muted">Marketplaces are scanned by driving a real Chrome like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in.</p>
+  <div class="grid-2">
+    <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible Chrome</label>
+    <label>Listings opened per site per run<input type="number" name="browser_max_items_per_run" value="{{ values.browser_max_items_per_run }}"></label>
+    <label>Min delay between listings (s)<input type="number" step="0.5" name="browser_min_delay" value="{{ values.browser_min_delay }}"></label>
+    <label>Max delay between listings (s)<input type="number" step="0.5" name="browser_max_delay" value="{{ values.browser_max_delay }}"></label>
+  </div>
+  <small class="muted">First-time setup: <code>pipenv install &amp;&amp; pipenv run browsers</code> (installs patchright + Chrome). If a site shows a "checking your browser" step, clear it once with <code>pipenv run solve autoscout24</code>. AutoScout24.ch doesn't need any of this — it uses a public JSON API directly, no browser involved.</small>
+
+  <h4>Marketplaces enabled</h4>
+  <fieldset>
+    <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_tutti_use_browser" {{ 'checked' if values.adapter_tutti_use_browser else '' }}> tutti.ch</span></label>
+    <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_ricardo_enabled" {{ 'checked' if values.adapter_ricardo_enabled else '' }}> Ricardo.ch</span></label>
+    <label class="check-row">
+      <span class="check-row-main"><input type="checkbox" name="adapter_autoscout24_enabled" {{ 'checked' if values.adapter_autoscout24_enabled else '' }}> AutoScout24.ch</span>
+      <small class="check-row-hint">Public JSON API, no browser or bypass needed.</small>
+    </label>
+    <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_facebook_enabled" {{ 'checked' if values.adapter_facebook_enabled else '' }}> Facebook Marketplace</span></label>
+  </fieldset>
+
+  <h4>Facebook login</h4>
+  <p class="note">⚠️ Automating Facebook violates its Terms and can get your account locked or banned. <strong>Recommended:</strong> log in once manually by running <code>python -m deal_finder.browser.fb_login</code> — no password is stored. The fields below are an optional auto-login fallback (less safe; 2FA still needs a manual step).</p>
+  <div class="grid-2">
+    <label>Facebook email<input type="text" name="facebook_email" value="{{ values.facebook_email }}"></label>
+    <label>Facebook password<input type="password" name="facebook_password" value="{{ '********' if values.facebook_password else '' }}"></label>
+  </div>
+
+  <button type="submit">Save settings</button>
+</form>
+{% endblock %}

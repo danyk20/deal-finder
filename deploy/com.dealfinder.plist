@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd LaunchAgent for Deal Finder.
+
+  Install (per-user):
+    0. From the project dir:  PIPENV_VENV_IN_PROJECT=1 pipenv install --dev
+       (creates ./.venv). Adjust PROJECT_DIR and the pipenv path below for your machine
+       (`which pipenv`).
+    1. cp deploy/com.dealfinder.plist ~/Library/LaunchAgents/com.dealfinder.plist
+    2. launchctl load -w ~/Library/LaunchAgents/com.dealfinder.plist
+    3. Open http://127.0.0.1:8000
+
+  KeepAlive restarts the app if it crashes and starts it at login. The scheduler
+  runs scans on each watch's schedule while the Mac is AWAKE. To also scan while it
+  would otherwise sleep, schedule wake events with deploy/setup_pmset.sh.
+
+  Ollama: run it as its own service (`brew services start ollama`) so the local model
+  is available when the app needs it.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dealfinder</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/pipenv</string>
+        <string>run</string>
+        <string>uvicorn</string>
+        <string>deal_finder.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/danielkosc/Projects/deal_finder</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Makes `pipenv run` use the in-project ./.venv deterministically under launchd. -->
+        <key>PIPENV_VENV_IN_PROJECT</key>
+        <string>1</string>
+        <!-- Same stable location the app uses by default, so the service and manual
+             `pipenv run` share ONE database (watches + saved credentials persist). -->
+        <key>DF_DATABASE_URL</key>
+        <string>sqlite:////Users/danielkosc/.deal_finder/deal_finder.db</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/danielkosc/Projects/deal_finder/dealfinder.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/danielkosc/Projects/deal_finder/dealfinder.log</string>
+</dict>
+</plist>

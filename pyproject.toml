@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deal-finder"
+version = "0.1.0"
+description = "Periodically scan second-hand marketplaces for specific items, enrich with a local LLM, and email matches."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlmodel>=0.0.16",
+    "apscheduler>=3.10,<4",
+    "httpx>=0.27",
+    "selectolax>=0.3",
+    "pydantic-settings>=2.1",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "tenacity>=8.2",
+    # AutoScout24.ch: calls the site's own public, unauthenticated JSON API directly
+    # (api.autoscout24.ch) — no browser or anti-bot bypass needed for that adapter.
+    "autoscout24-scraper>=0.1.0",
+]
+
+[project.optional-dependencies]
+# Browser-driven adapters. patchright is a drop-in patched Playwright that evades
+# Cloudflare/Turnstile detection; playwright is kept as a fallback. Installed by default
+# via the Pipfile ("browser" extra). Standalone: pip install -e ".[browser]" && patchright install chrome
+browser = ["patchright>=1.40", "playwright>=1.40"]
+# Facebook Marketplace adapter: a separate extra (not part of "browser") because it pulls
+# in its own dedicated Playwright-based package with its own Python floor (>=3.13), so
+# projects that don't want Facebook scanning (and its ToS/ban risk) can skip it and stay
+# on an older Python. Installed by default via the Pipfile ("facebook" extra).
+facebook = ["facebook-marketplace-scraper>=0.1.0"]
+dev = [
+    "pytest>=8",
+    "respx>=0.21",
+]
+
+[tool.setuptools.packages.find]
+include = ["deal_finder*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Watches · Deal Finder{% endblock %}
+{% block body %}
+<hgroup>
+  <h2>Watches</h2>
+  <p class="muted">Saved searches that scan marketplaces on a schedule and email you new matches.</p>
+</hgroup>
+
+{% if not smtp_configured %}
+<p class="note">⚠️ SMTP is not configured yet — emails won't send. Set it in <a href="/settings">Settings</a>.</p>
+{% endif %}
+
+{% if not rows %}
+<p>No watches yet. <a href="/watches/new" role="button">Create your first watch</a></p>
+{% else %}
+<table>
+  <thead><tr><th>Name</th><th>Status</th><th>Schedule</th><th>Marketplaces</th><th>Last run</th><th>Next run</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    {% set w = r.w %}
+    <tr>
+      <td><a href="/watches/{{ w.id }}">{{ w.name }}</a><br><small class="muted">{{ w.search_params.get('make','') }} {{ w.search_params.get('model','') }}</small></td>
+      <td>{% if w.active %}<span class="pill on">watching</span>{% else %}<span class="pill off">stopped</span>{% endif %}</td>
+      <td>{{ w.schedule_kind }}: <code>{{ w.schedule_value }}</code></td>
+      <td><small>{{ w.marketplaces | join(', ') or '—' }}</small></td>
+      <td><small>{{ w.last_run_at.strftime('%Y-%m-%d %H:%M') if w.last_run_at else '—' }}<br>{{ w.last_run_status or '' }}</small></td>
+      <td><small>{{ r.next_run.strftime('%Y-%m-%d %H:%M') if r.next_run else '—' }}</small></td>
+      <td>
+        <form method="post" action="/watches/{{ w.id }}/{{ 'stop' if w.active else 'start' }}" style="margin:0;">
+          <button type="submit" class="{{ 'secondary' if w.active else 'contrast' }}" style="margin:0;">{{ 'Stop' if w.active else 'Start' }}</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
