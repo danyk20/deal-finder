@@ -107,6 +107,8 @@ class BrowserSession:
         self._page = None
         self._captures: list[tuple[str, object]] = []
         self._locked = False
+        self.backend: str | None = None       # "patchright" | "playwright", set once launched
+        self.channel_used: str | None = None  # e.g. "chrome" or "bundled chromium"
 
     # -- lifecycle --
     def __enter__(self) -> "BrowserSession":
@@ -144,10 +146,15 @@ class BrowserSession:
                 "no browser backend; run: pipenv install && pipenv run browsers"
             ) from exc
 
+        self.backend = backend
         log.info("browser backend: %s", backend)
         self.config.user_data_dir.mkdir(parents=True, exist_ok=True)
         self._pw = sync_playwright().start()
-        self._ctx = self._launch(self.config.channel) or self._launch(None)
+        self._ctx = self._launch(self.config.channel)
+        self.channel_used = self.config.channel if self._ctx is not None else None
+        if self._ctx is None:
+            self._ctx = self._launch(None)
+            self.channel_used = "bundled chromium" if self._ctx is not None else None
         if self._ctx is None:
             self._pw.stop()
             self._pw = None

@@ -42,6 +42,15 @@ def main(argv: list[str] | None = None) -> None:
     cfg.headless = False  # must be visible so you can complete the challenge
     print(f"Opening {url}\n(profile '{profile}', visible Chrome)…")
     with BrowserSession(cfg) as session:
+        print(f"Backend: {session.backend} · channel: {session.channel_used}")
+        if session.channel_used != "chrome":
+            print(
+                "WARNING: fell back to a bundled Chromium instead of your real, installed "
+                "Chrome. Anti-bot vendors fingerprint bundled Chromium far more "
+                "aggressively than a genuine Chrome install, even patched -- this is a "
+                "likely cause of a challenge that never clears. Check that Google Chrome "
+                "is installed at the usual path and try again.\n"
+            )
         page = session.playwright_page
         page.goto(url, wait_until="domcontentloaded")
         try:
