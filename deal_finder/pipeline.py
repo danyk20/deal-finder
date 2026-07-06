@@ -155,7 +155,16 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
                 listings.extend(found)
                 result.adapter_status[key] = f"ok ({len(found)})"
             except AdapterError as exc:
-                result.adapter_status[key] = f"error: {exc}"
+                # A BotWallError raised partway through a browser adapter's run may carry
+                # whatever listings it already fetched successfully before hitting the
+                # wall (see BotWallError.partial_listings) -- keep those rather than
+                # discarding a run's worth of successful work over one later failure.
+                partial = getattr(exc, "partial_listings", None)
+                if partial:
+                    listings.extend(partial)
+                    result.adapter_status[key] = f"partial ({len(partial)}): {exc}"
+                else:
+                    result.adapter_status[key] = f"error: {exc}"
                 log.warning("adapter %s failed for watch %s: %s", key, watch.id, exc)
             except Exception as exc:  # noqa: BLE001 - never let one adapter abort the run
                 result.adapter_status[key] = f"error: {exc!r}"

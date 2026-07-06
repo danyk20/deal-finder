@@ -85,6 +85,36 @@ def test_adapter_error_is_isolated(session, monkeypatch):
     assert res.matched > 0  # demo still produced matches despite boom failing
 
 
+def test_adapter_bot_wall_keeps_partial_listings(session, monkeypatch):
+    """A browser adapter that hits a bot-wall partway through should still contribute
+    whatever it fetched before the wall, via BotWallError.partial_listings, instead of
+    losing that run's work entirely -- see pipeline.py::_collect_listings."""
+    from deal_finder import registry
+    from deal_finder.adapters.base import BaseAdapter, Listing
+    from deal_finder.browser.errors import BotWallError
+
+    partial = [
+        Listing(marketplace="wally", external_id="1", url="https://x/1", title="Tesla A", price=40000),
+        Listing(marketplace="wally", external_id="2", url="https://x/2", title="Tesla B", price=41000),
+    ]
+
+    class WalledAdapter(BaseAdapter):
+        key = "wally"
+        label = "Wally"
+        supported_categories = {"car"}
+
+        def search(self, query):
+            raise BotWallError("wally: HTTP 403 (bot-wall / rate-limited)", partial_listings=partial)
+
+    monkeypatch.setitem(registry.ADAPTERS, "wally", WalledAdapter())
+    monkeypatch.setattr(pipeline, "send_match_email", lambda *a, **k: None)
+    w = _mk_watch(session, marketplaces=("wally",))
+    s = Settings(seed_mode=False, ai_enabled=False, smtp_host="smtp.test")
+    res = pipeline.run_watch(session, w, settings=s)
+    assert res.adapter_status["wally"].startswith("partial (2)")
+    assert res.found == 2
+
+
 def test_preview_writes_nothing(session):
     w = _mk_watch(session, seed_done=True)
     s = Settings(seed_mode=False, ai_enabled=False)

@@ -36,9 +36,10 @@ def _detail_html(title):
 
 
 class FakeBrowserSession:
-    def __init__(self, search_html=SEARCH_HTML, blocked=False):
+    def __init__(self, search_html=SEARCH_HTML, blocked=False, block_detail_after=None):
         self._search_html = search_html
         self._blocked = blocked
+        self._block_detail_after = block_detail_after  # raise on the (n+1)th open_detail
         self.opened: list[str] = []
         self.pauses = 0
 
@@ -48,6 +49,9 @@ class FakeBrowserSession:
         return view
 
     def open_detail(self, url):
+        if self._block_detail_after is not None and len(self.opened) >= self._block_detail_after:
+            view = PageView(url=url, html="blocked", status=403)
+            check_blocked(view, "fake")  # raises BotWallError
         self.opened.append(url)
         return PageView(url=url, html=_detail_html(f"Tesla Model S ({url[-4:]})"), status=200)
 
@@ -91,6 +95,18 @@ def test_blocked_search_raises():
     settings = Settings(browser_search_pages=1)
     with pytest.raises(BotWallError):
         list(RicardoBrowserAdapter().search(_query(), browser=fake, settings=settings))
+
+
+def test_bot_wall_mid_run_keeps_already_fetched_listings():
+    """A wall hit while opening the 3rd of 3 listings' details shouldn't discard the
+    2 already successfully fetched -- see BotWallError.partial_listings."""
+    fake = FakeBrowserSession(block_detail_after=2)
+    settings = Settings(browser_max_items_per_run=15, browser_search_pages=1)
+    with pytest.raises(BotWallError) as exc_info:
+        list(RicardoBrowserAdapter().search(_query(), browser=fake, settings=settings))
+    partial = exc_info.value.partial_listings
+    assert len(partial) == 2
+    assert [li.external_id for li in partial] == ["111", "222"]
 
 
 def test_no_browser_raises_browser_unavailable():

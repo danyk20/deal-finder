@@ -99,8 +99,13 @@ class BrowserAdapter(BaseAdapter):
                     li = self.extract_detail(dview, card, query)
                     if li:
                         listings.append(li)
-                except BotWallError:
-                    raise  # a wall on details means the site is blocking us — abort this site
+                except BotWallError as exc:
+                    # Stop trying more listings this run, but keep whatever we already
+                    # fetched successfully -- a wall partway through (confirmed to happen
+                    # intermittently, not just on the very first request) shouldn't erase
+                    # already-good results.
+                    exc.partial_listings = list(listings)
+                    raise
                 except Exception as exc:  # noqa: BLE001 - one bad listing shouldn't kill the run
                     log.warning("%s: detail failed for %s: %s", self.key, card.url, exc)
         return listings
