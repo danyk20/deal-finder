@@ -5,14 +5,23 @@ Sync API is correct here: run_watch executes in a worker thread with no asyncio 
 (on-disk profile) is the key to bot-bypass: cookies/localStorage — including Akamai's
 _abck and a manual Facebook login — persist across runs.
 
-Two engines are supported (BrowserConfig.engine):
-  * "webkit" (default) -- Safari's real engine. Confirmed by direct testing to sail
-    through Ricardo's Cloudflare challenge with zero stealth patches, while even a real,
-    sandboxed, patched Chrome still gets challenged -- Cloudflare's bot management
-    appears to specifically target Chrome-family CDP automation, and driving a genuinely
-    different engine sidesteps that class of detection entirely.
+Three engines are supported (BrowserConfig.engine):
+  * "webkit" (default) -- Safari's real engine via Playwright. Confirmed by direct
+    testing to sail through Ricardo's Cloudflare challenge with zero stealth patches most
+    of the time, while even a real, sandboxed, patched Chrome still gets challenged --
+    Cloudflare's bot management appears to specifically target Chrome-family CDP
+    automation. Still intermittently blocked, though (see "safari" below for why).
   * "chromium" -- real Chrome (or bundled Chromium as a fallback), via patchright when
     available. Kept for sites that need Chrome-only features; prefer webkit otherwise.
+  * "safari" -- your REAL Safari.app, driven via AppleScript instead of Playwright at
+    all (see safari_applescript.py). No browser-automation protocol is involved, so
+    `navigator.webdriver` (which the W3C WebDriver spec requires EVERY automation tool --
+    Selenium, Playwright, anything -- to set) is never present. Confirmed by direct
+    testing to be far more reliable against Ricardo than "webkit" or even real Safari
+    driven via safaridriver/WebDriver. Requires a one-time, security-relevant opt-in
+    (`defaults write com.apple.Safari AllowJavaScriptFromAppleEvents -bool true`) that
+    deal_finder never sets for you, and takes over your actual Safari browser rather than
+    an isolated automation profile -- see that module's docstring for the full tradeoffs.
 
 A module-level lock serializes sessions process-wide, because two watches can run in
 parallel worker threads and would otherwise collide on the same browser profile dir.
@@ -113,6 +122,17 @@ def is_available() -> bool:
 
 
 class BrowserSession:
+    def __new__(cls, config: BrowserConfig):
+        # Dispatch to a completely different implementation for engine="safari" (real
+        # Safari.app driven via AppleScript, no browser-automation protocol at all -- see
+        # safari_applescript.py). Its class isn't a BrowserSession subclass, so Python
+        # skips calling BrowserSession.__init__ on the returned instance.
+        if config.engine == "safari":
+            from .safari_applescript import SafariAppleScriptSession
+
+            return SafariAppleScriptSession(config)
+        return super().__new__(cls)
+
     def __init__(self, config: BrowserConfig):
         self.config = config
         self._pw = None

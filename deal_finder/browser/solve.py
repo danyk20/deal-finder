@@ -20,6 +20,7 @@ from __future__ import annotations
 import sys
 
 from ..config import get_settings
+from .errors import BotWallError
 from .human import dismiss_cookie_banner
 from .session import BrowserConfig, BrowserSession
 
@@ -40,7 +41,8 @@ def main(argv: list[str] | None = None) -> None:
 
     cfg = BrowserConfig.from_settings(get_settings(), profile=profile)
     cfg.headless = False  # must be visible so you can complete the challenge
-    print(f"Opening {url}\n(profile '{profile}', visible {cfg.engine})…")
+    where = "your real Safari" if cfg.engine == "safari" else f"profile '{profile}'"
+    print(f"Opening {url}\n({where}, visible {cfg.engine})…")
     with BrowserSession(cfg) as session:
         print(f"Backend: {session.backend} · channel: {session.channel_used}")
         if cfg.engine == "chromium" and session.channel_used != "chrome":
@@ -51,19 +53,32 @@ def main(argv: list[str] | None = None) -> None:
                 "likely cause of a challenge that never clears. Check that Google Chrome "
                 "is installed at the usual path and try again.\n"
             )
-        page = session.playwright_page
-        page.goto(url, wait_until="domcontentloaded")
         try:
-            dismiss_cookie_banner(page)
-        except Exception:  # noqa: BLE001
-            pass
+            session.goto(url)
+        except BotWallError:
+            # Expected here: goto() already navigated and the window is showing whatever
+            # loaded (challenge page or not) before raising -- that's exactly the state
+            # this script exists to let you resolve by hand, so just keep going.
+            print("(Still challenged going by the page content -- that's what you're here to clear.)")
+        # dismiss_cookie_banner needs a raw Playwright page -- only the chromium/webkit
+        # engines have one; the "safari" engine (AppleScript, no Playwright at all) skips
+        # this cosmetic step.
+        page = getattr(session, "playwright_page", None)
+        if page is not None:
+            try:
+                dismiss_cookie_banner(page)
+            except Exception:  # noqa: BLE001
+                pass
         print(
             "\nIf you see a 'checking your browser' or 'I am not a robot' step, complete "
             "it yourself in the window. Then browse a real listing or two so the session "
             "looks used.\n"
         )
         input("When the real results are visible, press Enter to save and close… ")
-    print(f"Saved. The '{profile}' profile now carries the cleared session.")
+    if cfg.engine == "safari":
+        print("Done. (The \"safari\" engine has no separate profile to save -- it just used your real Safari.)")
+    else:
+        print(f"Saved. The '{profile}' profile now carries the cleared session.")
 
 
 if __name__ == "__main__":

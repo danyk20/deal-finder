@@ -25,7 +25,15 @@ def find_json_ld(html: str) -> list[dict]:
             data = json.loads(raw)
         except ValueError:
             continue
-        out.extend(data if isinstance(data, list) else [data])
+        for item in (data if isinstance(data, list) else [data]):
+            # schema.org's standard way to bundle multiple related entities (WebPage,
+            # Organization, Product, Offer, ...) under one script tag -- confirmed live
+            # on Ricardo.ch's current detail pages. Unpack it instead of treating the
+            # wrapper object itself as a single (typeless, useless) node.
+            if isinstance(item, dict) and isinstance(item.get("@graph"), list):
+                out.extend(item["@graph"])
+            else:
+                out.append(item)
     return [d for d in out if isinstance(d, dict)]
 
 

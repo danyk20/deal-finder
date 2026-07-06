@@ -55,6 +55,35 @@ def test_car_listing_fields_from_jsonld():
     assert f["image_urls"] == ["https://x/a.jpg", "https://x/b.jpg"]
 
 
+GRAPH_WRAPPED_DETAIL_HTML = """
+<html><head>
+<script id="pdp-json-ld" type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+  {"@type":"WebPage","name":"irrelevant wrapper node"},
+  {"@type":"Product","name":"Tesla Model S90D","description":"Free SuC",
+   "offers":{"@type":"Offer","price":"1","priceCurrency":"CHF"},
+   "image":["https://x/a.jpg"],"vehicleModelDate":"2016"}
+]}
+</script></head><body>ok</body></html>
+"""
+
+
+def test_find_json_ld_unpacks_graph_wrapper():
+    """Ricardo's current detail pages (and other schema.org sites) bundle multiple
+    entities under one @graph-wrapped script tag rather than separate top-level nodes."""
+    nodes = ex.find_json_ld(GRAPH_WRAPPED_DETAIL_HTML)
+    types = [n.get("@type") for n in nodes]
+    assert "Product" in types
+    assert "WebPage" in types
+
+
+def test_car_listing_fields_from_graph_wrapped_jsonld():
+    f = ex.car_listing_fields(GRAPH_WRAPPED_DETAIL_HTML)
+    assert f["title"] == "Tesla Model S90D"
+    assert f["price"] == 1.0
+    assert f["year"] == 2016
+
+
 def test_card_links_dedup_and_id():
     tutti = ex.card_links(SEARCH_HTML, re.compile(r"/vi/(\d+)"), "https://www.tutti.ch")
     assert dict(tutti) == {

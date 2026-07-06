@@ -52,12 +52,18 @@ class Settings(BaseSettings):
 
     # --- Browser automation (shared by browser-driven adapters) ---
     # "webkit" (default) drives Safari's real engine via Playwright -- confirmed by direct
-    # testing to sail through Ricardo's Cloudflare challenge with no stealth patches at
-    # all, while even a real, sandboxed, patched Chrome ("chromium") still gets
-    # challenged. Cloudflare's bot management appears to specifically target Chrome-family
-    # CDP automation; "chromium" is kept as a fallback for sites that need Chrome-only
-    # features (e.g. a real Chrome extension), but "webkit" should be preferred.
-    browser_engine: str = "webkit"           # "webkit" | "chromium"
+    # testing to sail through Ricardo's Cloudflare challenge most of the time with no
+    # stealth patches, while even a real, sandboxed, patched Chrome ("chromium") reliably
+    # gets challenged. "chromium" is kept as a fallback for sites that need Chrome-only
+    # features. "safari" drives your REAL Safari.app via AppleScript instead of any
+    # browser-automation protocol at all -- no tool-driven browser can avoid the
+    # WebDriver-spec-mandated navigator.webdriver flag, but AppleScript's `do JavaScript`
+    # sidesteps the whole problem by not using WebDriver/CDP in the first place. Confirmed
+    # far more reliable against Ricardo than "webkit", but requires a one-time,
+    # security-relevant opt-in deal_finder never sets for you (see
+    # browser/safari_applescript.py's docstring) and takes over your real Safari browser
+    # rather than an isolated automation profile.
+    browser_engine: str = "webkit"           # "webkit" | "chromium" | "safari"
     browser_headless: bool = False           # headful helps vs. Akamai/Meta; Mac has a display
     browser_channel: str = "chrome"          # chromium only: "chrome"|"msedge"|"" (bundled Chromium)
     browser_profile_dir: str = "~/.deal_finder/profiles"
