@@ -1,12 +1,21 @@
-"""BrowserSession — a real, headful Chrome driven via Playwright's SYNC API.
+"""BrowserSession — a real, headful browser driven via Playwright's SYNC API.
 
 Sync API is correct here: run_watch executes in a worker thread with no asyncio loop
 (scheduler uses asyncio.to_thread; the API uses run_in_threadpool). A persistent context
 (on-disk profile) is the key to bot-bypass: cookies/localStorage — including Akamai's
 _abck and a manual Facebook login — persist across runs.
 
+Two engines are supported (BrowserConfig.engine):
+  * "webkit" (default) -- Safari's real engine. Confirmed by direct testing to sail
+    through Ricardo's Cloudflare challenge with zero stealth patches, while even a real,
+    sandboxed, patched Chrome still gets challenged -- Cloudflare's bot management
+    appears to specifically target Chrome-family CDP automation, and driving a genuinely
+    different engine sidesteps that class of detection entirely.
+  * "chromium" -- real Chrome (or bundled Chromium as a fallback), via patchright when
+    available. Kept for sites that need Chrome-only features; prefer webkit otherwise.
+
 A module-level lock serializes sessions process-wide, because two watches can run in
-parallel worker threads and would otherwise collide on the same Chrome profile dir.
+parallel worker threads and would otherwise collide on the same browser profile dir.
 """
 
 from __future__ import annotations
@@ -23,7 +32,7 @@ from . import human
 from .detect import check_blocked
 from .errors import BrowserUnavailable
 from .page import PageView
-from .stealth import DEFAULT_USER_AGENT, STEALTH_JS
+from .stealth import DEFAULT_SAFARI_USER_AGENT, DEFAULT_USER_AGENT, STEALTH_JS
 
 log = logging.getLogger("deal_finder.browser")
 
@@ -43,27 +52,31 @@ class SessionLike(Protocol):
 
 @dataclass
 class BrowserConfig:
+    engine: str = "webkit"  # "webkit" | "chromium"
     headless: bool = False
-    channel: str | None = "chrome"
+    channel: str | None = "chrome"  # chromium only
     user_data_dir: Path = Path("~/.deal_finder/profiles/default").expanduser()
     locale: str = "de-CH"
     timezone_id: str = "Europe/Zurich"
-    user_agent: str = DEFAULT_USER_AGENT
+    user_agent: str = DEFAULT_SAFARI_USER_AGENT
     min_delay: float = 2.5
     max_delay: float = 6.0
     nav_timeout_ms: int = 45_000
     proxy: dict | None = None
-    use_patchright: bool = True
+    use_patchright: bool = True  # chromium only
 
     @classmethod
     def from_settings(cls, settings: Settings, *, profile: str = "default") -> "BrowserConfig":
         base = Path(settings.browser_profile_dir).expanduser()
         proxy = {"server": settings.browser_proxy_url} if settings.browser_proxy_url else None
+        engine = settings.browser_engine or "webkit"
+        default_ua = DEFAULT_USER_AGENT if engine == "chromium" else DEFAULT_SAFARI_USER_AGENT
         return cls(
+            engine=engine,
             headless=settings.browser_headless,
             channel=(settings.browser_channel or None),
             user_data_dir=base / profile,
-            user_agent=(settings.browser_user_agent or DEFAULT_USER_AGENT),
+            user_agent=(settings.browser_user_agent or default_ua),
             min_delay=settings.browser_min_delay,
             max_delay=settings.browser_max_delay,
             nav_timeout_ms=int(settings.browser_nav_timeout * 1000),
@@ -139,6 +152,48 @@ class BrowserSession:
             _SESSION_LOCK.release()
 
     def _start(self) -> None:
+        if self.config.engine == "webkit":
+            self._start_webkit()
+        else:
+            self._start_chromium()
+        self._ctx.set_default_navigation_timeout(self.config.nav_timeout_ms)
+        self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+        self._page.on("response", self._on_response)
+
+    def _start_webkit(self) -> None:
+        # No patchright equivalent for webkit (patchright only patches Chromium), and
+        # none needed -- real WebKit already sails through Cloudflare's Chrome/CDP-
+        # targeted detection with no stealth patches at all (see module docstring).
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise BrowserUnavailable(
+                "no browser backend; run: pipenv install && pipenv run browsers"
+            ) from exc
+
+        self.backend = "webkit"
+        log.info("browser backend: webkit")
+        self.config.user_data_dir.mkdir(parents=True, exist_ok=True)
+        self._pw = sync_playwright().start()
+        kwargs = dict(
+            user_data_dir=str(self.config.user_data_dir),
+            headless=self.config.headless,
+            locale=self.config.locale,
+            timezone_id=self.config.timezone_id,
+            user_agent=self.config.user_agent,
+            viewport={"width": 1440, "height": 900},
+        )
+        if self.config.proxy:
+            kwargs["proxy"] = self.config.proxy
+        try:
+            self._ctx = self._pw.webkit.launch_persistent_context(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            self._pw.stop()
+            self._pw = None
+            raise BrowserUnavailable(f"could not launch WebKit: {exc}") from exc
+        self.channel_used = "webkit"
+
+    def _start_chromium(self) -> None:
         try:
             sync_playwright, backend = _sync_playwright_factory(self.config.use_patchright)
         except ImportError as exc:
@@ -150,22 +205,26 @@ class BrowserSession:
         log.info("browser backend: %s", backend)
         self.config.user_data_dir.mkdir(parents=True, exist_ok=True)
         self._pw = sync_playwright().start()
-        self._ctx = self._launch(self.config.channel)
+        self._ctx = self._launch_chromium(self.config.channel)
         self.channel_used = self.config.channel if self._ctx is not None else None
         if self._ctx is None:
-            self._ctx = self._launch(None)
+            self._ctx = self._launch_chromium(None)
             self.channel_used = "bundled chromium" if self._ctx is not None else None
         if self._ctx is None:
             self._pw.stop()
             self._pw = None
             raise BrowserUnavailable("could not launch Chrome or bundled Chromium")
 
-        self._ctx.add_init_script(STEALTH_JS)
-        self._ctx.set_default_navigation_timeout(self.config.nav_timeout_ms)
-        self._page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
-        self._page.on("response", self._on_response)
+        # STEALTH_JS is a crude JS-level patch (e.g. navigator.webdriver's getter
+        # replaced with a plain arrow function, which fails a .toString()-native-code
+        # check; fake plugins that fail `instanceof PluginArray`) -- confirmed via
+        # bot.sannysoft.com to actively FAIL two checks that patchright's own CDP-level
+        # handling already passes cleanly on its own. Only apply it when running on
+        # stock Playwright, where it's still better than nothing.
+        if backend != "patchright":
+            self._ctx.add_init_script(STEALTH_JS)
 
-    def _launch(self, channel):
+    def _launch_chromium(self, channel):
         kwargs = dict(
             user_data_dir=str(self.config.user_data_dir),
             headless=self.config.headless,

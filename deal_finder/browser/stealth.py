@@ -53,7 +53,19 @@ STEALTH_JS = r"""
 })();
 """
 
-# A current, realistic macOS Chrome UA. Overridable via DF_BROWSER_USER_AGENT.
+# A current, realistic macOS Safari UA, used when BrowserConfig.engine == "webkit".
+# Real WebKit (Playwright's webkit browser type -- Safari's actual engine, not Chrome
+# pretending to be Safari) was confirmed via direct testing to sail through Ricardo's
+# Cloudflare challenge with zero stealth patches, while patched/sandboxed Chromium (even
+# with a real Chrome binary) still gets challenged. Cloudflare's bot management appears to
+# specifically target Chrome-family CDP automation; a genuinely different browser engine
+# sidesteps that class of detection entirely. Overridable via DF_BROWSER_USER_AGENT.
+DEFAULT_SAFARI_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+)
+
+# A current, realistic macOS Chrome UA, used when BrowserConfig.engine == "chromium".
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

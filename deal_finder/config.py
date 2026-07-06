@@ -51,19 +51,26 @@ class Settings(BaseSettings):
     request_timeout: float = 20.0
 
     # --- Browser automation (shared by browser-driven adapters) ---
+    # "webkit" (default) drives Safari's real engine via Playwright -- confirmed by direct
+    # testing to sail through Ricardo's Cloudflare challenge with no stealth patches at
+    # all, while even a real, sandboxed, patched Chrome ("chromium") still gets
+    # challenged. Cloudflare's bot management appears to specifically target Chrome-family
+    # CDP automation; "chromium" is kept as a fallback for sites that need Chrome-only
+    # features (e.g. a real Chrome extension), but "webkit" should be preferred.
+    browser_engine: str = "webkit"           # "webkit" | "chromium"
     browser_headless: bool = False           # headful helps vs. Akamai/Meta; Mac has a display
-    browser_channel: str = "chrome"          # "chrome"|"msedge"|"" (bundled Chromium)
+    browser_channel: str = "chrome"          # chromium only: "chrome"|"msedge"|"" (bundled Chromium)
     browser_profile_dir: str = "~/.deal_finder/profiles"
-    browser_user_agent: str = ""             # "" -> a realistic default Chrome UA
+    browser_user_agent: str = ""             # "" -> a realistic default UA for the chosen engine
     browser_max_items_per_run: int = 15      # detail pages opened one-at-a-time, per site, per run
     browser_search_pages: int = 2            # search-result pages to page through
     browser_min_delay: float = 2.5
     browser_max_delay: float = 6.0
     browser_nav_timeout: float = 45.0
     browser_proxy_url: str = ""              # optional CH residential proxy; "" = direct
-    # Use patchright (patched Playwright) when available: hides the CDP/automation
-    # signals Cloudflare/Turnstile detect, so challenges usually don't appear. Falls
-    # back to stock Playwright if patchright isn't installed.
+    # chromium only: use patchright (patched Playwright) when available: hides the
+    # CDP/automation signals Cloudflare/Turnstile detect. Falls back to stock Playwright
+    # if patchright isn't installed. Irrelevant when browser_engine == "webkit".
     browser_use_patchright: bool = True
 
     # --- Per-adapter enable (which marketplaces a run may touch) ---
@@ -97,6 +104,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "seed_mode",
     "max_results_per_run",
     # browser + adapters
+    "browser_engine",
     "browser_headless",
     "browser_max_items_per_run",
     "browser_min_delay",

@@ -40,10 +40,10 @@ def main(argv: list[str] | None = None) -> None:
 
     cfg = BrowserConfig.from_settings(get_settings(), profile=profile)
     cfg.headless = False  # must be visible so you can complete the challenge
-    print(f"Opening {url}\n(profile '{profile}', visible Chrome)…")
+    print(f"Opening {url}\n(profile '{profile}', visible {cfg.engine})…")
     with BrowserSession(cfg) as session:
         print(f"Backend: {session.backend} · channel: {session.channel_used}")
-        if session.channel_used != "chrome":
+        if cfg.engine == "chromium" and session.channel_used != "chrome":
             print(
                 "WARNING: fell back to a bundled Chromium instead of your real, installed "
                 "Chrome. Anti-bot vendors fingerprint bundled Chromium far more "

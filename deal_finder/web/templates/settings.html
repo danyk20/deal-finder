@@ -66,9 +66,15 @@
   </div>
 
   <h4>Browser (marketplace scanning)</h4>
-  <p class="muted">Ricardo.ch is scanned by driving a real Chrome like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in. (tutti, AutoScout24 and Facebook use their own methods and ignore these settings.)</p>
+  <p class="muted">Ricardo.ch is scanned by driving a real browser like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in. (tutti, AutoScout24 and Facebook use their own methods and ignore these settings.)</p>
   <div class="grid-2">
-    <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible Chrome{{ hint('Runs the automated Chrome window hidden in the background instead of visibly on screen. Hidden mode is more likely to get flagged by bot-detection, so leave it off unless you need a fully background setup.') }}</label>
+    <label>Browser engine{{ hint("webkit (Safari's real engine) is confirmed to sail through Ricardo's Cloudflare challenge with no extra tricks needed, while chromium (Chrome) gets challenged even when patched and sandboxed correctly -- Cloudflare's bot management specifically targets Chrome-family automation. Keep webkit unless a site needs a Chrome-only feature.") }}
+      <select name="browser_engine">
+        <option value="webkit" {{ 'selected' if values.browser_engine == 'webkit' else '' }}>webkit (Safari engine, recommended)</option>
+        <option value="chromium" {{ 'selected' if values.browser_engine == 'chromium' else '' }}>chromium (Chrome)</option>
+      </select>
+    </label>
+    <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible browser{{ hint('Runs the automated browser window hidden in the background instead of visibly on screen. Hidden mode is more likely to get flagged by bot-detection, so leave it off unless you need a fully background setup.') }}</label>
     <label>Listings opened per site per run{{ hint('Maximum number of individual listing pages opened per marketplace, per run, when scanning via the browser.') }}
       <input type="number" name="browser_max_items_per_run" value="{{ values.browser_max_items_per_run }}"></label>
     <label>Min delay between listings (s){{ hint('Minimum random pause (in seconds) between opening consecutive listings, to look less like an automated script.') }}
