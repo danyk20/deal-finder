@@ -4,7 +4,7 @@ The adapter calls the `autoscout24-scraper` package, which itself talks to the s
 public JSON API (api.autoscout24.ch). We monkeypatch that package's functions (the same
 seam the adapter imports) rather than mocking HTTP, and pin the field-mapping against a
 real captured payload (tests/fixtures/autoscout24_listings.json), mirroring the
-fixture-test pattern used for tutti's parse_tutti_response.
+fixture-test pattern used across the other adapters.
 """
 
 from __future__ import annotations

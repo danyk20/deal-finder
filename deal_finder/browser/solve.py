@@ -1,20 +1,18 @@
 """Clear a one-time bot-challenge yourself in a visible browser.
 
-Applies to the adapters that use deal_finder's own shared browser/ session (tutti,
-Ricardo) — those may show a "checking your browser" / "I am not a robot" step. Deal
-Finder never solves these itself — instead this opens a VISIBLE Chrome on the site's
-persistent profile so YOU complete the step once. The cleared session then persists in
-the profile, and scheduled scans reuse it. Re-run this if scans start reporting
-challenges again.
+Applies to Ricardo — the one adapter that uses deal_finder's own shared browser/ session
+and may show a "checking your browser" / "I am not a robot" step. Deal Finder never solves
+these itself — instead this opens a VISIBLE Chrome on the site's persistent profile so YOU
+complete the step once. The cleared session then persists in the profile, and scheduled
+scans reuse it. Re-run this if scans start reporting challenges again.
 
-AutoScout24 (a plain public JSON API) and Facebook (its own dedicated package with its
-own login flow — see `python -m deal_finder.browser.fb_login`) don't use this session
-and aren't valid targets here.
+tutti and AutoScout24 (plain public APIs) and Facebook (its own dedicated package with its
+own login flow — see `python -m deal_finder.browser.fb_login`) don't use this session and
+aren't valid targets here.
 
 Run:
-    python -m deal_finder.browser.solve tutti
     python -m deal_finder.browser.solve ricardo
-    python -m deal_finder.browser.solve https://www.tutti.ch/de/q/autos?query=Tesla%20Model%20S
+    python -m deal_finder.browser.solve https://www.ricardo.ch/de/s/Tesla%20Model%20S
 """
 
 from __future__ import annotations
@@ -27,7 +25,6 @@ from .session import BrowserConfig, BrowserSession
 
 # adapter key -> (profile subdir, a representative warm-up URL)
 _TARGETS = {
-    "tutti": ("tutti", "https://www.tutti.ch/de/q/autos?query=Tesla%20Model%20S"),
     "ricardo": ("ricardo", "https://www.ricardo.ch/de/s/Tesla%20Model%20S"),
 }
 

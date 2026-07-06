@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     browser_use_patchright: bool = True
 
     # --- Per-adapter enable (which marketplaces a run may touch) ---
-    adapter_tutti_use_browser: bool = True   # use the browser path for tutti (fixes the 403)
+    adapter_tutti_enabled: bool = True        # plain public GraphQL API; no browser involved
     adapter_ricardo_enabled: bool = True
     adapter_autoscout24_enabled: bool = True  # plain public JSON API; no browser involved
     adapter_facebook_enabled: bool = True      # user chose on-by-default (ToS/ban risk!)
@@ -95,7 +95,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "browser_max_items_per_run",
     "browser_min_delay",
     "browser_max_delay",
-    "adapter_tutti_use_browser",
+    "adapter_tutti_enabled",
     "adapter_ricardo_enabled",
     "adapter_autoscout24_enabled",
     "adapter_facebook_enabled",

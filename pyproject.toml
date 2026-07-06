@@ -21,6 +21,9 @@ dependencies = [
     # AutoScout24.ch: calls the site's own public, unauthenticated JSON API directly
     # (api.autoscout24.ch) — no browser or anti-bot bypass needed for that adapter.
     "autoscout24-scraper>=0.1.0",
+    # tutti.ch: calls tutti's own public GraphQL API directly (tutti.ch/api/v10/graphql)
+    # — plain requests, no browser or anti-bot bypass needed for that adapter.
+    "tutti-scraper>=0.2.0",
 ]
 
 [project.optional-dependencies]

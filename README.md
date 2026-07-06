@@ -11,15 +11,16 @@ HTMX) and a JSON API. Built to extend to new item types (houses, phones, …) an
 marketplaces by dropping in one file.
 
 > **Status:** framework, matching, dedup, scheduling, local-AI enrichment, email, API and
-> UI are complete and tested. **tutti.ch** and **Ricardo** are scanned by **driving a real
-> Chrome like a human** (via **patchright** — a patched Playwright that evades bot
-> detection — with a persistent profile, opening the search page then each listing one at
-> a time with random delays; tutti verified end-to-end, Ricardo works but may rate-limit
-> under frequent access). **AutoScout24** and **Facebook** each wrap a dedicated PyPI
-> package that manages its own access: AutoScout24 calls the site's own public JSON API
-> directly ([autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/)) — no
-> browser or bypass needed at all; Facebook drives its own separate Playwright browser and
-> login flow ([facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/))
+> UI are complete and tested. **Ricardo** is scanned by **driving a real Chrome like a
+> human** (via **patchright** — a patched Playwright that evades bot detection — with a
+> persistent profile, opening the search page then each listing one at a time with random
+> delays; works but may rate-limit under frequent access). **tutti.ch**, **AutoScout24**
+> and **Facebook** each wrap a dedicated PyPI package that manages its own access: tutti
+> ([tutti-scraper](https://pypi.org/project/tutti-scraper/)) and AutoScout24
+> ([autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/)) call the sites'
+> own public GraphQL/JSON APIs directly — no browser or bypass needed at all, both
+> verified end-to-end; Facebook drives its own separate Playwright browser and login flow
+> ([facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/))
 > — on by default, needs a one-time login, and carries ToS/ban risk. See
 > [Marketplaces](#marketplaces).
 
@@ -43,11 +44,11 @@ pipenv run test                            # run the test suite (offline; no bro
 Handy shortcuts are defined in the `Pipfile` `[scripts]`: `dev`, `start`, `test`,
 `browsers`, `fb-login`, `solve` — run any with `pipenv run <name>`.
 
-If tutti or Ricardo ever shows a "checking your browser" / "I'm not a robot" step, clear
-it **once** yourself in a visible window — the cleared session persists in the browser
-profile and scheduled scans reuse it: `pipenv run solve <marketplace>`. Deal Finder never
-solves challenges itself. AutoScout24 (public API) and Facebook (its own dedicated
-package — see below) don't use this shared browser session, so this never applies to them.
+If Ricardo ever shows a "checking your browser" / "I'm not a robot" step, clear it **once**
+yourself in a visible window — the cleared session persists in the browser profile and
+scheduled scans reuse it: `pipenv run solve ricardo`. Deal Finder never solves challenges
+itself. tutti and AutoScout24 (public APIs) and Facebook (its own dedicated package — see
+below) don't use this shared browser session, so this never applies to them.
 
 Open http://127.0.0.1:8000, create a watch (Make `Tesla`, Model `Model S`, price/year
 filters, your email, pick marketplaces), then **Run now**. Use the **Demo** marketplace to
@@ -131,7 +132,7 @@ See `deal_finder/adapters/ricardo.py` (a ~15-line adapter) and `deal_finder/adap
 
 | Adapter | State | Notes |
 |---|---|---|
-| **tutti.ch** | ✅ verified end-to-end | Real headful Chrome; opens each car listing one at a time. Restricts to the `/autos/` category (skips toys/accessories). Verified live 2026. |
+| **tutti.ch** | ✅ verified end-to-end | Uses the [tutti-scraper](https://pypi.org/project/tutti-scraper/) package, which calls tutti's own **public GraphQL API** (`tutti.ch/api/v10/graphql`) directly — plain requests, no browser or bypass. Pins the search to tutti's `cars` category (skips toys/accessories) and reads structured make/year/mileage properties. |
 | **Ricardo.ch** | ✅ working (may rate-limit) | Verified extraction (search cards + detail). Free-text search returns some accessories too — add price/keyword filters to narrow. Frequent access can trigger a temporary 403 (logged, retried next run). |
 | **AutoScout24.ch** | ✅ verified end-to-end | Biggest Swiss car inventory. Uses the [autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/) package, which calls `api.autoscout24.ch` — the site's own **public, unauthenticated JSON API** — directly. No browser, no Cloudflare/Akamai to bypass, no anti-bot measures needed at all. |
 | **Facebook Marketplace** | ⚠️ on by default; needs login | Uses the [facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/) package, which drives its own dedicated Playwright browser directly against facebook.com (no public API exists). Log in once via `python -m deal_finder.browser.fb_login` (stores no password) — its session is saved inside that package's own installed directory, so a `pipenv sync`/reinstall wipes it and you'll need to log in again. **Automating Facebook violates its ToS and risks account lock/ban** — use a dedicated account. |

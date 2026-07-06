@@ -72,6 +72,7 @@ class RunResult:
 def _adapter_enabled(key: str, settings: Settings) -> bool:
     """Per-adapter global enable flag (a watch may select an adapter that's globally off)."""
     return {
+        "tutti": settings.adapter_tutti_enabled,
         "ricardo": settings.adapter_ricardo_enabled,
         "autoscout24": settings.adapter_autoscout24_enabled,
         "facebook": settings.adapter_facebook_enabled,
@@ -80,36 +81,34 @@ def _adapter_enabled(key: str, settings: Settings) -> bool:
 
 @contextlib.contextmanager
 def _browser_session(settings: Settings):
-    """Yield a live BrowserSession, or None if Playwright is missing / launch fails.
-    Never raises on launch failure, so httpx/demo adapters still run."""
+    """Yield ``(session, error)``: a live BrowserSession with error=None, or (None, reason)
+    if Playwright is missing / the browser won't launch. Never raises on launch failure,
+    so httpx adapters still run and the reason is surfaced per-adapter (not just swallowed).
+    """
     try:
-        from ..browser import BrowserConfig, BrowserSession, is_available
-    except Exception:  # noqa: BLE001
-        yield None
+        from .browser import BrowserConfig, BrowserSession, is_available
+    except Exception as exc:  # noqa: BLE001
+        yield None, f"browser layer import failed: {exc}"
         return
     if not is_available():
-        yield None
+        yield None, "no browser backend installed (run: pipenv install && pipenv run browsers)"
         return
     try:
         session = BrowserSession(BrowserConfig.from_settings(settings))
-    except Exception:  # noqa: BLE001
-        yield None
-        return
-    entered = False
-    try:
         session.__enter__()
-        entered = True
-        yield session
     except Exception as exc:  # noqa: BLE001 - launch failure -> browser adapters degrade
-        log.warning("browser session unavailable: %s", exc)
-        if not entered:
-            yield None
+        log.warning("browser launch failed: %s", exc, exc_info=True)
+        yield None, f"browser launch failed: {exc}"
+        return
+    # Launch succeeded. Body exceptions propagate normally (each adapter is wrapped in its
+    # own try/except in _collect_listings, so this yields cleanly); teardown in finally.
+    try:
+        yield session, None
     finally:
-        if entered:
-            try:
-                session.__exit__(None, None, None)
-            except Exception:  # noqa: BLE001
-                pass
+        try:
+            session.__exit__(None, None, None)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _collect_listings(watch: Watch, query, category, result: RunResult, settings: Settings) -> list[Listing]:
@@ -133,10 +132,15 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
     needs_browser = any(_needs_browser(a) for _, a in plan)
     listings: list[Listing] = []
 
-    with _browser_session(settings) if needs_browser else contextlib.nullcontext(None) as browser:
+    cm = _browser_session(settings) if needs_browser else contextlib.nullcontext((None, None))
+    with cm as (browser, browser_error):
         for key, adapter in plan:
             try:
                 if getattr(adapter, "requires_browser", False):
+                    if browser is None:
+                        # This adapter needs a browser but none launched — surface the real
+                        # reason instead of the adapter's opaque "no browser session".
+                        raise AdapterError(browser_error or "browser not available for this run")
                     found = list(adapter.search(query, browser=browser, settings=settings))
                 else:
                     found = list(adapter.search(query))

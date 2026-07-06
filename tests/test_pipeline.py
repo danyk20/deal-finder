@@ -93,6 +93,42 @@ def test_preview_writes_nothing(session):
     assert rows == []
 
 
+def test_browser_session_imports_browser_layer(monkeypatch):
+    """Regression: _browser_session must import deal_finder.browser with a SINGLE dot.
+    A '..browser' typo raised 'attempted relative import beyond top-level package', which
+    was swallowed into a None session so every browser adapter (tutti/Ricardo) failed with
+    an opaque 'no browser session available'. Mocks avoid launching a real browser."""
+    import deal_finder.browser as browser_mod
+
+    class _FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(browser_mod, "is_available", lambda: True)
+    monkeypatch.setattr(browser_mod, "BrowserSession", lambda cfg: _FakeSession())
+
+    with pipeline._browser_session(Settings()) as (browser, error):
+        assert error is None, f"browser layer should import cleanly, got: {error}"
+        assert browser is not None
+
+
+def test_top_level_modules_use_single_dot_imports():
+    """Guard the whole class of bug: modules directly under deal_finder/ must not use
+    '..' relative imports (that reaches beyond the top-level package and always throws)."""
+    import pathlib
+    import re
+
+    pkg_dir = pathlib.Path(pipeline.__file__).parent
+    offenders = [
+        f.name for f in pkg_dir.glob("*.py")
+        if re.search(r"^\s*from \.\.", f.read_text(encoding="utf-8"), re.MULTILINE)
+    ]
+    assert offenders == [], f"top-level modules must use single-dot imports, found '..' in: {offenders}"
+
+
 def test_dry_run_opens_tabs_instead_of_emailing(session, monkeypatch):
     opened_urls = []
     monkeypatch.setattr(pipeline, "open_listings", lambda urls, **k: opened_urls.extend(urls) or len(urls))

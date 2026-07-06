@@ -31,18 +31,21 @@
   </div>
 
   <h4>Browser (marketplace scanning)</h4>
-  <p class="muted">Marketplaces are scanned by driving a real Chrome like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in.</p>
+  <p class="muted">Ricardo.ch is scanned by driving a real Chrome like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in. (tutti, AutoScout24 and Facebook use their own methods and ignore these settings.)</p>
   <div class="grid-2">
     <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible Chrome</label>
     <label>Listings opened per site per run<input type="number" name="browser_max_items_per_run" value="{{ values.browser_max_items_per_run }}"></label>
     <label>Min delay between listings (s)<input type="number" step="0.5" name="browser_min_delay" value="{{ values.browser_min_delay }}"></label>
     <label>Max delay between listings (s)<input type="number" step="0.5" name="browser_max_delay" value="{{ values.browser_max_delay }}"></label>
   </div>
-  <small class="muted">First-time setup: <code>pipenv install &amp;&amp; pipenv run browsers</code> (installs patchright + Chrome). If a site shows a "checking your browser" step, clear it once with <code>pipenv run solve autoscout24</code>. AutoScout24.ch doesn't need any of this — it uses a public JSON API directly, no browser involved.</small>
+  <small class="muted">First-time setup: <code>pipenv install &amp;&amp; pipenv run browsers</code> (installs patchright + Chrome). If Ricardo shows a "checking your browser" step, clear it once with <code>pipenv run solve ricardo</code>. tutti.ch and AutoScout24.ch don't need any of this — they use public APIs directly, no browser involved.</small>
 
   <h4>Marketplaces enabled</h4>
   <fieldset>
-    <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_tutti_use_browser" {{ 'checked' if values.adapter_tutti_use_browser else '' }}> tutti.ch</span></label>
+    <label class="check-row">
+      <span class="check-row-main"><input type="checkbox" name="adapter_tutti_enabled" {{ 'checked' if values.adapter_tutti_enabled else '' }}> tutti.ch</span>
+      <small class="check-row-hint">Public GraphQL API, no browser or bypass needed.</small>
+    </label>
     <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_ricardo_enabled" {{ 'checked' if values.adapter_ricardo_enabled else '' }}> Ricardo.ch</span></label>
     <label class="check-row">
       <span class="check-row-main"><input type="checkbox" name="adapter_autoscout24_enabled" {{ 'checked' if values.adapter_autoscout24_enabled else '' }}> AutoScout24.ch</span>

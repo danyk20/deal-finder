@@ -208,7 +208,7 @@ _BOOL_SETTINGS = {
     "ai_enabled",
     "seed_mode",
     "browser_headless",
-    "adapter_tutti_use_browser",
+    "adapter_tutti_enabled",
     "adapter_ricardo_enabled",
     "adapter_autoscout24_enabled",
     "adapter_facebook_enabled",
