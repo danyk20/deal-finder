@@ -10,14 +10,24 @@ spec REQUIRES every implementation -- Selenium, Playwright, anything -- to set
 uses Safari's decades-old Apple Events scripting support, a completely different mechanism
 that never attaches any automation protocol, so that tell never fires.
 
+The window is positioned off every display (never shown to you) rather than minimized or
+hidden: minimizing changes the Page Visibility API (document.hidden/visibilityState),
+itself a plausible bot signal and untested territory, whereas an off-screen-but-not-
+minimized window has the exact same document.hidden state a normal backgrounded tab
+already has (confirmed empirically: document.hidden was already true just from Safari
+not being the frontmost app, and 5/5 search+detail cycles against Ricardo still passed
+with the window off-screen) -- so this doesn't introduce a new signal, it reuses one
+that's already a completely ordinary state for a real user's browser.
+
 Trade-offs vs. the Playwright-based BrowserSession:
   * Requires the user to run `defaults write com.apple.Safari
     AllowJavaScriptFromAppleEvents -bool true` once (a real, if narrow, security-relevant
     setting -- it lets any AppleScript-capable process run JS in your open Safari pages).
     Not enabled by default; deal_finder never sets it for you.
   * Uses your REAL Safari application, not an isolated automation profile -- there is no
-    separate "profile" to keep clean, and a scan briefly takes over a Safari tab. Don't
-    rely on this engine while you need Safari for something else at the same time.
+    separate "profile" to keep clean, and a scan briefly takes over a Safari window (off
+    -screen). Don't rely on this engine while you need Safari for something else at the
+    same time -- it's the same application, just a window you won't see.
   * No network-response capture (PageView.captures is always empty) -- fine for Ricardo,
     which extracts everything from the rendered HTML, but a hard limitation vs Playwright.
   * macOS only, obviously.
@@ -59,13 +69,25 @@ def _run_applescript(script: str) -> str:
     return result.stdout.rstrip("\n")
 
 
+# Off-screen, not minimized: minimizing (or literally hiding the app) changes the Page
+# Visibility API (document.hidden/visibilityState), which is itself a plausible bot
+# signal and untested territory. A window positioned off every display keeps the exact
+# same document.hidden state a real backgrounded tab has (confirmed by direct testing:
+# document.hidden was already true just from Safari not being the frontmost app, and
+# 5/5 search+detail cycles against Ricardo still passed with the window off-screen) --
+# so this doesn't introduce a new signal, it just uses one that's already normal.
+_OFFSCREEN_BOUNDS = "-3000, -3000, -1560, -2100"
+
+
 def _ensure_document() -> None:
+    # No `activate` -- stealing focus is exactly what "not visible" means to avoid, and
+    # AppleScript/Apple Events don't require the target app to be frontmost to work.
     _run_applescript(
         'tell application "Safari"\n'
-        "    activate\n"
         "    if (count of documents) is 0 then\n"
         "        make new document\n"
         "    end if\n"
+        f"    set bounds of window 1 to {{{_OFFSCREEN_BOUNDS}}}\n"
         "end tell"
     )
 
@@ -74,10 +96,10 @@ def _navigate(url: str) -> None:
     escaped = _escape_as(url)
     _run_applescript(
         'tell application "Safari"\n'
-        "    activate\n"
         "    if (count of documents) is 0 then\n"
         "        make new document\n"
         "    end if\n"
+        f"    set bounds of window 1 to {{{_OFFSCREEN_BOUNDS}}}\n"
         f'    set URL of document 1 to "{escaped}"\n'
         "end tell"
     )

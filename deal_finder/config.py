@@ -61,8 +61,9 @@ class Settings(BaseSettings):
     # sidesteps the whole problem by not using WebDriver/CDP in the first place. Confirmed
     # far more reliable against Ricardo than "webkit", but requires a one-time,
     # security-relevant opt-in deal_finder never sets for you (see
-    # browser/safari_applescript.py's docstring) and takes over your real Safari browser
-    # rather than an isolated automation profile.
+    # browser/safari_applescript.py's docstring). Uses your real Safari application
+    # rather than an isolated automation profile, though the window is positioned
+    # off-screen so it's never visible or focus-stealing.
     browser_engine: str = "webkit"           # "webkit" | "chromium" | "safari"
     browser_headless: bool = False           # headful helps vs. Akamai/Meta; Mac has a display
     browser_channel: str = "chrome"          # chromium only: "chrome"|"msedge"|"" (bundled Chromium)

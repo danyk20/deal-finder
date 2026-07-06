@@ -68,7 +68,7 @@
   <h4>Browser (marketplace scanning)</h4>
   <p class="muted">Ricardo.ch is scanned by driving a real browser like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in. (tutti, AutoScout24 and Facebook use their own methods and ignore these settings.)</p>
   <div class="grid-2">
-    <label>Browser engine{{ hint("webkit sails through Ricardo's Cloudflare challenge most of the time with no extra setup, chromium gets challenged reliably, and safari (your real Safari.app, via AppleScript) is the most reliable of the three but requires a one-time terminal command -- see the note below -- and briefly takes over your actual Safari browser during each scan.") }}
+    <label>Browser engine{{ hint("webkit sails through Ricardo's Cloudflare challenge most of the time with no extra setup, chromium gets challenged reliably, and safari (your real Safari.app, via AppleScript) is the most reliable of the three but requires a one-time terminal command -- see the note below. It briefly uses a Safari window during each scan, positioned off-screen so it never appears or steals focus.") }}
       <select name="browser_engine">
         <option value="webkit" {{ 'selected' if values.browser_engine == 'webkit' else '' }}>webkit (Safari engine, no setup needed)</option>
         <option value="safari" {{ 'selected' if values.browser_engine == 'safari' else '' }}>safari (real Safari.app, most reliable, requires setup)</option>
@@ -84,7 +84,7 @@
       <input type="number" step="0.5" name="browser_max_delay" value="{{ values.browser_max_delay }}"></label>
   </div>
   <small class="muted">First-time setup: <code>pipenv install &amp;&amp; pipenv run browsers</code> (installs patchright + Chrome). If Ricardo shows a "checking your browser" step, clear it once with <code>pipenv run solve ricardo</code>. tutti.ch and AutoScout24.ch don't need any of this — they use public APIs directly, no browser involved.</small>
-  <p class="note">⚠️ The "safari" engine drives your real Safari.app and needs a one-time terminal command: <code>defaults write com.apple.Safari AllowJavaScriptFromAppleEvents -bool true</code>. This lets any AppleScript-capable process run JavaScript in your open Safari pages — a real, if narrow, reduction in Safari's isolation. Only enable it if you're comfortable with that tradeoff. It also briefly takes over an actual Safari tab during each scan, so avoid it if you need Safari free for other things at the same time.</p>
+  <p class="note">⚠️ The "safari" engine drives your real Safari.app and needs a one-time terminal command: <code>defaults write com.apple.Safari AllowJavaScriptFromAppleEvents -bool true</code>. This lets any AppleScript-capable process run JavaScript in your open Safari pages — a real, if narrow, reduction in Safari's isolation. Only enable it if you're comfortable with that tradeoff. Each scan briefly uses a Safari window positioned off-screen (never visible, never steals focus), but it's still your real Safari application underneath — avoid this engine if you need Safari fully free for other things at the exact same moment.</p>
 
   <h4>Marketplaces enabled</h4>
   <fieldset>
