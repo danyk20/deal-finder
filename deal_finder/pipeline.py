@@ -1,18 +1,23 @@
 """The core scan pipeline: run a single watch once.
 
-``run_watch`` is synchronous (adapters, DB, SMTP are all blocking). Async callers
+``run_watch`` is synchronous (adapters, DB, SMTP/Telegram are all blocking). Async callers
 (the scheduler and API) invoke it via ``asyncio.to_thread`` so nothing blocks the loop.
 
 Modes (controlled by flags):
-  * Scheduled scan:  send_email=True,  ignore_seen=False  -> seeds on first run, then
-    emails genuinely-new listings and records them as seen.
-  * Preview search:  send_email=False, ignore_seen=True   -> returns matches, no email,
+  * Scheduled scan:  notify=True,  ignore_seen=False  -> seeds on first run, then notifies
+    (via the watch's chosen channel) genuinely-new listings and records them as seen.
+  * Preview search:  notify=False, ignore_seen=True   -> returns matches, no notification,
     no DB writes (the UI "test search" button).
-  * Test email:      send_email=True,  ignore_seen=True    -> emails matches treating all
-    as new, no DB writes (verify email formatting/SMTP).
-  * Dry run:         dry_run=True                          -> opens every match in a new
-    local browser tab instead of emailing. No AI enrichment, no DB writes, ever (dry_run
-    always behaves as a pure preview regardless of ignore_seen/send_email).
+  * Test send:       notify=True,  ignore_seen=True    -> notifies matches treating all as
+    new, no DB writes (verify email/Telegram formatting and delivery).
+  * Dry run:         dry_run=True                     -> opens every match in a new local
+    browser tab instead of notifying, REGARDLESS of the watch's channel. No AI enrichment,
+    no DB writes, ever (dry_run always behaves as a pure preview regardless of
+    ignore_seen/notify).
+
+``notify`` was named ``send_email`` before Telegram support was added; the query
+param/form field at the HTTP layer keeps that name for compatibility (see web/api.py,
+web/routes.py) and is simply mapped to ``notify=`` when calling into this module.
 """
 
 from __future__ import annotations
@@ -24,15 +29,16 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from . import progress
 from .adapters.base import AdapterError, Listing
 from .ai import Enrichment, OllamaClient, enrich_listing
 from .config import Settings
 from .db import runtime_settings
 from .matching import dedup_cross_marketplace, passes_filters
 from .models import NotificationLog, SeenListing, Watch, utcnow
-# Aliased so the `send_email: bool` parameter of run_watch can't shadow the function.
-from .notify import EmailMatch, open_listings, render_email
+from .notify import EmailMatch, TelegramMatch, open_listings, render_email
 from .notify import send_email as send_match_email
+from .notify import send_telegram_match
 from .registry import get_adapter, get_category
 
 log = logging.getLogger("deal_finder.pipeline")
@@ -61,7 +67,8 @@ class RunResult:
     new: int = 0
     notified: int = 0
     seeded: bool = False
-    emailed: bool = False
+    emailed: bool = False  # kept name for compatibility; means "notified via any channel"
+    channel: str | None = None  # "email" | "telegram", set once a send is attempted
     dry_run: bool = False
     opened: int = 0
     adapter_status: dict[str, str] = field(default_factory=dict)
@@ -135,6 +142,7 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
     cm = _browser_session(settings) if needs_browser else contextlib.nullcontext((None, None))
     with cm as (browser, browser_error):
         for key, adapter in plan:
+            progress.set_status(watch.id, f"Searching {getattr(adapter, 'label', key)}…")
             try:
                 if getattr(adapter, "requires_browser", False):
                     if browser is None:
@@ -160,7 +168,28 @@ def run_watch(
     watch: Watch,
     *,
     settings: Settings | None = None,
-    send_email: bool = True,
+    notify: bool = True,
+    ignore_seen: bool = False,
+    dry_run: bool = False,
+    ai_client: OllamaClient | None = None,
+) -> RunResult:
+    """Thin wrapper around _run_watch that guarantees the live status shown to the web UI
+    (see progress.py) is cleared once the run ends, however it ends."""
+    try:
+        return _run_watch(
+            session, watch, settings=settings, notify=notify,
+            ignore_seen=ignore_seen, dry_run=dry_run, ai_client=ai_client,
+        )
+    finally:
+        progress.clear_status(watch.id)
+
+
+def _run_watch(
+    session: Session,
+    watch: Watch,
+    *,
+    settings: Settings | None = None,
+    notify: bool = True,
     ignore_seen: bool = False,
     dry_run: bool = False,
     ai_client: OllamaClient | None = None,
@@ -170,6 +199,7 @@ def run_watch(
     # dry_run is always a pure preview: never write to the DB, regardless of ignore_seen.
     record = (not ignore_seen) and not dry_run
 
+    progress.set_status(watch.id, "Starting run…")
     category = get_category(watch.category)
     if category is None:
         result.error = f"unknown category '{watch.category}'"
@@ -179,6 +209,7 @@ def run_watch(
     listings = _collect_listings(watch, query, category, result, settings)
     result.found = len(listings)
 
+    progress.set_status(watch.id, f"Found {result.found} listing(s); filtering & deduping…")
     matched = [li for li in listings if passes_filters(li, query, category, watch)]
     matched = dedup_cross_marketplace(matched)
     result.matched = len(matched)
@@ -200,6 +231,7 @@ def run_watch(
     # Seeding run: record existing matches as seen, do not email.
     is_seed = record and settings.seed_mode and not watch.seed_done
     if is_seed:
+        progress.set_status(watch.id, f"First run: recording {len(matched)} existing listing(s) as seen…")
         for li in matched:
             _record_seen(session, watch, li, notified=False)
         watch.seed_done = True
@@ -212,23 +244,38 @@ def run_watch(
 
     new = new[: settings.max_results_per_run]
     if not new:
+        progress.set_status(watch.id, "No new matches.")
         _finish(session, watch, "ok (no new matches)", record)
         return result
 
     if dry_run:
         # No AI enrichment, no email, no DB writes -- just pop each match open for a look.
+        progress.set_status(watch.id, f"Dry run: opening {len(new)} listing(s) in your browser…")
         opened = open_listings([li.url for li in new])
         result.dry_run = True
         result.opened = opened
         _finish(session, watch, f"dry run: opened {opened} tab(s)", record)
         return result
 
-    if not send_email:
+    if not notify:
         result.new = len(new)
+        progress.set_status(watch.id, f"Preview: found {len(new)} new match(es).")
         _finish(session, watch, "preview", record=False)
         return result
 
-    # Enrich + email.
+    channel = watch.notify_channel or "email"
+    result.channel = channel
+    if channel == "telegram":
+        _send_via_telegram(session, watch, new, settings, ai_client, result, record)
+    else:
+        _send_via_email(session, watch, new, settings, ai_client, result, record)
+    return result
+
+
+def _send_via_email(session, watch, new, settings, ai_client, result, record) -> None:
+    """One HTML email covering the whole batch -- all-or-nothing per run, same as before
+    Telegram support existed."""
+    progress.set_status(watch.id, f"Enriching {len(new)} listing(s) with AI…")
     email_matches = [
         EmailMatch(
             listing=li,
@@ -238,6 +285,7 @@ def run_watch(
         for li in new
     ]
     subject, html = render_email(watch, email_matches)
+    progress.set_status(watch.id, "Sending email…")
     try:
         send_match_email(settings, watch.notify_email, subject, html)
         result.emailed = True
@@ -245,16 +293,55 @@ def run_watch(
         if record:
             for li in new:
                 _record_seen(session, watch, li, notified=True)
-            _log_notification(session, watch, subject, len(email_matches), True, None)
+            _log_notification(session, watch, subject, len(email_matches), True, None, channel="email")
         _finish(session, watch, f"emailed {len(email_matches)}", record)
     except Exception as exc:  # noqa: BLE001 - EmailNotConfigured, SMTP/OS errors, etc.
         result.error = f"email failed: {exc}"
         log.warning("email failed for watch %s: %s", watch.id, exc)
         if record:
             # Do NOT mark as seen -> retried on the next run.
-            _log_notification(session, watch, subject, len(email_matches), False, str(exc))
+            _log_notification(session, watch, subject, len(email_matches), False, str(exc), channel="email")
         _finish(session, watch, result.error, record)
-    return result
+
+
+def _send_via_telegram(session, watch, new, settings, ai_client, result, record) -> None:
+    """One Telegram message PER LISTING (unlike email's single batch document). Each
+    listing is marked seen as soon as its own send succeeds, so a mid-batch failure never
+    causes already-delivered listings to be re-sent on retry. Stops at the first failure
+    (almost always systemic -- bad token/chat id, rate limit -- not per-listing; the one
+    per-listing failure mode, an unfetchable photo, is already absorbed inside
+    send_telegram_match's own photo->text fallback) and leaves that listing plus every
+    remaining one unseen, to be retried on the next scheduled run."""
+    sent = 0
+    error: str | None = None
+    for idx, li in enumerate(new, start=1):
+        progress.set_status(watch.id, f"Enriching & sending listing {idx}/{len(new)} via Telegram…")
+        match = TelegramMatch(
+            listing=li,
+            enrichment=_safe_enrich(settings, li, watch.questions, ai_client),
+            questions=watch.questions or [],
+        )
+        try:
+            send_telegram_match(settings, watch.telegram_chat_id, match)
+        except Exception as exc:  # noqa: BLE001 - TelegramNotConfigured, TelegramApiError, etc.
+            error = str(exc)
+            log.warning("telegram send failed for watch %s: %s", watch.id, exc)
+            break
+        sent += 1
+        if record:
+            _record_seen(session, watch, li, notified=True)
+
+    result.emailed = sent > 0
+    result.notified = sent
+    if error:
+        result.error = f"telegram failed: {error}"
+    if record:
+        _log_notification(
+            session, watch, f"Telegram: {sent} match(es)", sent, error is None, error,
+            channel="telegram", recipient=watch.telegram_chat_id,
+        )
+    status = f"sent via telegram ({sent})" if error is None else result.error
+    _finish(session, watch, status, record)
 
 
 def _safe_enrich(settings, listing, questions, ai_client) -> Enrichment:
@@ -283,11 +370,16 @@ def _record_seen(session: Session, watch: Watch, li: Listing, *, notified: bool)
     session.add(row)
 
 
-def _log_notification(session, watch, subject, n, success, error) -> None:
+def _log_notification(
+    session, watch, subject, n, success, error, *, channel: str = "email", recipient: str | None = None
+) -> None:
     session.add(
         NotificationLog(
             watch_id=watch.id,
-            email_to=watch.notify_email,
+            # `email_to` holds the recipient regardless of channel (an email address or a
+            # Telegram chat ID) -- kept unrenamed to avoid a RENAME COLUMN migration.
+            email_to=recipient if recipient is not None else watch.notify_email,
+            channel=channel,
             subject=subject,
             num_matches=n,
             success=success,

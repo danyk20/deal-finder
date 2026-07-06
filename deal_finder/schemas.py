@@ -17,6 +17,8 @@ class WatchCreate(BaseModel):
     search_params: dict[str, Any] = {}
     filters: dict[str, Any] = {}
     notify_email: str = ""
+    notify_channel: str = "telegram"
+    telegram_chat_id: str = ""
     questions: list[str] = []
     active: bool = False
 
@@ -30,6 +32,8 @@ class WatchUpdate(BaseModel):
     search_params: Optional[dict[str, Any]] = None
     filters: Optional[dict[str, Any]] = None
     notify_email: Optional[str] = None
+    notify_channel: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
     questions: Optional[list[str]] = None
     active: Optional[bool] = None
 
@@ -45,6 +49,8 @@ class WatchRead(BaseModel):
     search_params: dict[str, Any]
     filters: dict[str, Any]
     notify_email: str
+    notify_channel: str
+    telegram_chat_id: str
     questions: list[str]
     seed_done: bool
     created_at: datetime

@@ -36,8 +36,14 @@ def test_watch_crud_run_start_stop(client, monkeypatch):
     assert r.status_code == 201, r.text
     wid = r.json()["id"]
     assert r.json()["questions"] == ["Condition?"]
+    assert r.json()["notify_channel"] == "telegram"  # default channel
 
     assert any(w["id"] == wid for w in client.get("/api/watches").json())
+
+    # Round-trip notify_channel/telegram_chat_id.
+    r = client.patch(f"/api/watches/{wid}", json={"notify_channel": "email", "telegram_chat_id": "999"})
+    assert r.json()["notify_channel"] == "email"
+    assert r.json()["telegram_chat_id"] == "999"
 
     # Preview run (no email, no writes) finds the matching demo listings.
     res = client.post(f"/api/watches/{wid}/run-now").json()

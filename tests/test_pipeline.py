@@ -12,7 +12,8 @@ def _mk_watch(session, marketplaces=("demo",), seed_done=False):
         name="Tesla MS", category="car", marketplaces=list(marketplaces),
         search_params={"make": "Tesla", "model": "Model S"},
         filters={"price_max": 60000, "year_min": 2016},
-        notify_email="me@example.com", questions=["Condition?"], seed_done=seed_done,
+        notify_email="me@example.com", notify_channel="email",
+        questions=["Condition?"], seed_done=seed_done,
     )
     session.add(w)
     session.commit()
@@ -25,7 +26,7 @@ def test_seed_run_records_without_email(session, monkeypatch):
     monkeypatch.setattr(pipeline, "send_match_email", lambda *a, **k: sent.append(a))
     w = _mk_watch(session)
     s = Settings(seed_mode=True, ai_enabled=False, smtp_host="smtp.test")
-    res = pipeline.run_watch(session, w, settings=s, send_email=True, ignore_seen=False)
+    res = pipeline.run_watch(session, w, settings=s, notify=True, ignore_seen=False)
     assert res.seeded is True and res.notified == 0
     assert sent == []
     rows = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
@@ -87,7 +88,7 @@ def test_adapter_error_is_isolated(session, monkeypatch):
 def test_preview_writes_nothing(session):
     w = _mk_watch(session, seed_done=True)
     s = Settings(seed_mode=False, ai_enabled=False)
-    res = pipeline.run_watch(session, w, settings=s, send_email=False, ignore_seen=True)
+    res = pipeline.run_watch(session, w, settings=s, notify=False, ignore_seen=True)
     assert res.matched > 0 and res.matches_preview
     rows = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
     assert rows == []
@@ -160,13 +161,74 @@ def test_dry_run_never_writes_even_with_ignore_seen_false(session, monkeypatch):
     assert w.seed_done is False  # untouched
 
 
-def test_dry_run_takes_precedence_over_send_email(session, monkeypatch):
+def _mk_telegram_watch(session, marketplaces=("demo",), seed_done=False):
+    w = Watch(
+        name="Tesla MS", category="car", marketplaces=list(marketplaces),
+        search_params={"make": "Tesla", "model": "Model S"},
+        filters={"price_max": 60000, "year_min": 2016},
+        notify_channel="telegram", telegram_chat_id="12345",
+        questions=["Condition?"], seed_done=seed_done,
+    )
+    session.add(w)
+    session.commit()
+    session.refresh(w)
+    return w
+
+
+def test_normal_run_sends_telegram_then_dedups(session, monkeypatch):
+    sent = []
+    monkeypatch.setattr(pipeline, "send_telegram_match", lambda settings, chat_id, match: sent.append((chat_id, match)))
+    w = _mk_telegram_watch(session)
+    s = Settings(seed_mode=False, ai_enabled=False, telegram_bot_token="TOKEN")
+    res = pipeline.run_watch(session, w, settings=s)
+    assert res.channel == "telegram"
+    assert res.emailed is True and res.notified > 0
+    assert len(sent) == res.notified
+    assert all(chat_id == "12345" for chat_id, _ in sent)
+    # Second run finds nothing new -> no further sends.
+    res2 = pipeline.run_watch(session, w, settings=s)
+    assert res2.new == 0 and res2.emailed is False
+    assert len(sent) == res.notified
+
+
+def test_telegram_failure_keeps_listing_unseen(session, monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(settings, chat_id, match):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("bad chat id")
+
+    monkeypatch.setattr(pipeline, "send_telegram_match", flaky)
+    w = _mk_telegram_watch(session)
+    s = Settings(seed_mode=False, ai_enabled=False, telegram_bot_token="TOKEN")
+    res = pipeline.run_watch(session, w, settings=s)
+    assert res.error and "bad chat id" in res.error
+    assert res.notified == 1  # only the first listing succeeded before the failure
+    rows = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
+    assert len(rows) == 1  # only the successfully-sent listing was recorded as seen
+
+
+def test_dry_run_ignores_channel(session, monkeypatch):
+    opened = []
+    monkeypatch.setattr(pipeline, "open_listings", lambda urls, **k: opened.extend(urls) or len(urls))
+    sent = []
+    monkeypatch.setattr(pipeline, "send_telegram_match", lambda *a, **k: sent.append(a))
+    w = _mk_telegram_watch(session, seed_done=True)
+    s = Settings(seed_mode=False, ai_enabled=False, telegram_bot_token="TOKEN")
+    res = pipeline.run_watch(session, w, settings=s, dry_run=True, ignore_seen=True)
+    assert res.dry_run is True
+    assert len(opened) > 0
+    assert sent == []
+
+
+def test_dry_run_takes_precedence_over_notify(session, monkeypatch):
     opened = []
     monkeypatch.setattr(pipeline, "open_listings", lambda urls, **k: opened.extend(urls) or len(urls))
     sent = []
     monkeypatch.setattr(pipeline, "send_match_email", lambda *a, **k: sent.append(a))
     w = _mk_watch(session, seed_done=True)
     s = Settings(seed_mode=False, ai_enabled=False, smtp_host="smtp.test")
-    res = pipeline.run_watch(session, w, settings=s, send_email=True, dry_run=True, ignore_seen=True)
+    res = pipeline.run_watch(session, w, settings=s, notify=True, dry_run=True, ignore_seen=True)
     assert res.dry_run is True and res.emailed is False
     assert sent == [] and len(opened) > 0

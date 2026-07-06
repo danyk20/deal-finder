@@ -57,8 +57,16 @@
   </div>
 
   <h4>Notification</h4>
+  <div style="display:flex; gap:1rem;">
+    <label><input type="radio" name="notify_channel" value="email" {{ 'checked' if watch and watch.notify_channel == 'email' else '' }}> Email</label>
+    <label><input type="radio" name="notify_channel" value="telegram" {{ 'checked' if not watch or watch.notify_channel == 'telegram' else '' }}> Telegram</label>
+  </div>
   <label>Email address for matches
     <input type="email" name="notify_email" value="{{ default_email }}" placeholder="you@example.com">
+  </label>
+
+  <label>Telegram chat ID
+    <input type="text" name="telegram_chat_id" value="{{ default_chat_id }}" placeholder="123456789">
   </label>
 
   <label>Questions for the AI (one per line) — answered from each listing's text

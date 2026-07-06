@@ -17,7 +17,7 @@ from .. import service
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-_MASKED_KEYS = {"smtp_password", "facebook_password"}
+_MASKED_KEYS = {"smtp_password", "facebook_password", "telegram_bot_token"}
 
 
 def _get_watch(session: Session, watch_id: int) -> Watch:
@@ -145,13 +145,13 @@ def stop_watch(watch_id: int, session: Session = Depends(get_session)) -> WatchR
 @router.post("/watches/{watch_id}/run-now")
 def run_now(
     watch_id: int,
-    send_email: bool = False,
+    send_email: bool = False,  # query param name kept for compatibility; means "notify"
     dry_run: bool = False,
     session: Session = Depends(get_session),
 ) -> dict:
     watch = _get_watch(session, watch_id)
     result = service.run_now(
-        session, watch, send_email=send_email and not dry_run, test_mode=True, dry_run=dry_run
+        session, watch, notify=send_email and not dry_run, test_mode=True, dry_run=dry_run
     )
     return dataclasses.asdict(result)
 

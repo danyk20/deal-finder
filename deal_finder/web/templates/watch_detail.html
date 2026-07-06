@@ -25,13 +25,50 @@
     <button type="submit">Run now</button>
   </form>
   <label class="check-row">
-    <span class="check-row-main"><input type="checkbox" name="send_email" form="run-now-form"> Send test email</span>
+    <span class="check-row-main"><input type="checkbox" name="send_email" form="run-now-form"> Send test notification</span>
+    <small class="check-row-hint">Uses this watch's channel: {{ w.notify_channel }}</small>
   </label>
   <label class="check-row">
     <span class="check-row-main"><input type="checkbox" name="dry_run" form="run-now-form"> Dry run</span>
     <small class="check-row-hint">Opens matches in new browser tabs instead of emailing.</small>
   </label>
 </div>
+
+<div id="run-overlay" class="run-overlay" style="display:none;">
+  <div class="run-overlay-box">
+    <strong>Running watch…</strong>
+    <progress></progress>
+    <p id="run-progress-text" class="muted">Starting…</p>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var form = document.getElementById('run-now-form');
+    var overlay = document.getElementById('run-overlay');
+    var text = document.getElementById('run-progress-text');
+    var watchId = {{ w.id }};
+
+    form.addEventListener('submit', function () {
+      // Don't preventDefault: the browser proceeds with its normal POST + full-page
+      // navigation, exactly as before. This overlay just polls for a status message
+      // while that request is in flight; the moment the response arrives, the browser
+      // replaces the whole page (overlay included), so there's nothing to clean up.
+      overlay.style.display = 'flex';
+      text.textContent = 'Starting…';
+      (async function poll() {
+        while (true) {
+          try {
+            var res = await fetch('/watches/' + watchId + '/run-status');
+            var data = await res.json();
+            if (data.status) text.textContent = data.status;
+          } catch (err) { /* transient poll error -- page navigates away when the run ends */ }
+          await new Promise(function (resolve) { setTimeout(resolve, 500); });
+        }
+      })();
+    });
+  })();
+</script>
 
 {% if run_result %}
 <article style="margin-top:1rem;">

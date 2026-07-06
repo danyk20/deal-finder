@@ -38,6 +38,21 @@
     .panel > form { margin:0 0 .85rem; }
     .panel button { width:auto; margin:0; }
 
+    /* Small "ⓘ" tooltip icon, e.g. next to a settings field's label — hover/focus shows
+       the explanation via the native `title` attribute, no extra JS needed. */
+    .hint { cursor:help; color:var(--pico-muted-color); font-size:.85em; margin-left:.3rem; }
+
+    /* Full-page overlay shown while a "Run now" request is in flight (see watch_detail.html).
+       It never intercepts the form's normal submission/navigation -- the browser just
+       replaces the whole page once the response arrives, taking the overlay away with it. */
+    .run-overlay { position:fixed; inset:0; background:rgba(255,255,255,.85); display:flex;
+                   align-items:center; justify-content:center; z-index:1000; }
+    .run-overlay .run-overlay-box { background:var(--pico-background-color);
+                   border:1px solid var(--pico-muted-border-color); border-radius:var(--pico-border-radius);
+                   padding:1.5rem 2rem; min-width:280px; max-width:90vw; text-align:center;
+                   box-shadow:0 4px 24px rgba(0,0,0,.15); }
+    .run-overlay progress { width:100%; margin:.75rem 0 .5rem; }
+
     /* Click-to-sort table headers (table.sortable — see the script at the end of body). */
     table.sortable th { cursor:pointer; user-select:none; white-space:nowrap; }
     table.sortable th:hover { color: var(--pico-primary); }

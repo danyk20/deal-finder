@@ -1,42 +1,80 @@
 {% extends "base.html" %}
 {% block title %}Settings · Deal Finder{% endblock %}
 {% block body %}
+
+{% macro hint(text) -%}
+<span class="hint" title="{{ text }}">ⓘ</span>
+{%- endmacro %}
+
 <h2>Settings</h2>
 <p class="muted">These override the values from your <code>.env</code> file and are stored in the database.</p>
 
 <form method="post" action="/settings">
   <h4>Email (SMTP)</h4>
   <div class="grid-2">
-    <label>SMTP host<input type="text" name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.gmail.com"></label>
-    <label>SMTP port<input type="number" name="smtp_port" value="{{ values.smtp_port }}"></label>
-    <label>SMTP user<input type="text" name="smtp_user" value="{{ values.smtp_user }}"></label>
-    <label>SMTP password<input type="password" name="smtp_password" value="{{ '********' if values.smtp_password else '' }}"></label>
-    <label>From address<input type="text" name="smtp_from" value="{{ values.smtp_from }}"></label>
-    <label style="align-self:end;"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls else '' }}> Use STARTTLS</label>
+    <label>SMTP host{{ hint("Your email provider's outgoing mail server address, e.g. smtp.gmail.com. Check your provider's SMTP docs if unsure.") }}
+      <input type="text" name="smtp_host" value="{{ values.smtp_host }}" placeholder="smtp.gmail.com"></label>
+    <label>SMTP port{{ hint('Port for the SMTP connection. 587 (with STARTTLS) works for most providers; 465 is used for implicit TLS.') }}
+      <input type="number" name="smtp_port" value="{{ values.smtp_port }}"></label>
+    <label>SMTP user{{ hint('The login username for your SMTP server -- usually your full email address. Some providers (SendGrid, Mailgun, etc.) use an API key here instead.') }}
+      <input type="text" id="smtp_user" name="smtp_user" value="{{ values.smtp_user }}"></label>
+    <label>SMTP password{{ hint('Password for the SMTP account above. For Gmail/Workspace, generate an App Password rather than using your normal login password.') }}
+      <input type="password" name="smtp_password" value="{{ '********' if values.smtp_password else '' }}"></label>
+    <label>From address{{ hint('The address recipients see as the sender. Usually the same as SMTP user (auto-filled as you type) -- override it only if your provider uses a separate login (e.g. an API key) or a verified send-as alias.') }}
+      <input type="text" id="smtp_from" name="smtp_from" value="{{ values.smtp_from }}"></label>
+    <label style="align-self:end;"><input type="checkbox" name="smtp_starttls" {{ 'checked' if values.smtp_starttls else '' }}> Use STARTTLS{{ hint('Encrypts the SMTP connection. Leave this on unless your provider specifically requires it off.') }}</label>
   </div>
-  <label>Default email for new watches<input type="email" name="default_notify_email" value="{{ values.default_notify_email }}"></label>
+  <label>Default email for new watches{{ hint("Pre-fills the email field whenever you create a NEW watch, so you don't have to retype it each time. Does not change existing watches, and only matters for watches whose notification channel is set to Email.") }}
+    <input type="email" name="default_notify_email" value="{{ values.default_notify_email }}"></label>
+
+  <script>
+    (function () {
+      var user = document.getElementById("smtp_user");
+      var from = document.getElementById("smtp_from");
+      var fromTouched = Boolean(from.value) && from.value !== user.value;
+      from.addEventListener("input", function () { fromTouched = true; });
+      user.addEventListener("input", function () {
+        if (!fromTouched) from.value = user.value;
+      });
+    })();
+  </script>
+
+  <h4>Telegram</h4>
+  <p class="muted">Create a bot via <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, paste its token below, then message your bot and run <code>pipenv run telegram-chat-id</code> to find a chat ID.</p>
+  <div class="grid-2">
+    <label>Bot token{{ hint('The token @BotFather gives you when you create a bot, looks like 123456789:AAExampleTokenText. Required for any watch using the Telegram channel.') }}
+      <input type="password" name="telegram_bot_token" value="{{ '********' if values.telegram_bot_token else '' }}"></label>
+    <label>Default chat ID for new watches{{ hint("Pre-fills the Telegram chat ID field whenever you create a NEW watch. Run pipenv run telegram-chat-id after messaging your bot to find your chat ID. Does not change existing watches.") }}
+      <input type="text" name="telegram_default_chat_id" value="{{ values.telegram_default_chat_id }}"></label>
+  </div>
 
   <h4>Local AI (Ollama)</h4>
-  <label><input type="checkbox" name="ai_enabled" {{ 'checked' if values.ai_enabled else '' }}> Enable AI translation &amp; Q&amp;A</label>
+  <label><input type="checkbox" name="ai_enabled" {{ 'checked' if values.ai_enabled else '' }}> Enable AI translation &amp; Q&amp;A{{ hint('Uses a local Ollama model to translate listing descriptions and answer each watch\'s custom questions from the listing text. Turn off to skip AI entirely and notify with the raw listing text.') }}</label>
   <div class="grid-2">
-    <label>Ollama base URL<input type="text" name="ollama_base_url" value="{{ values.ollama_base_url }}"></label>
-    <label>Model<input type="text" name="ollama_model" value="{{ values.ollama_model }}" placeholder="gemma3:4b"></label>
+    <label>Ollama base URL{{ hint('Address of your local Ollama server\'s OpenAI-compatible API. Default is http://localhost:11434/v1 -- only change this if Ollama runs elsewhere.') }}
+      <input type="text" name="ollama_base_url" value="{{ values.ollama_base_url }}"></label>
+    <label>Model{{ hint('Which Ollama model to use for translation/Q&A. Must already be pulled locally (ollama pull <model>) before it will work.') }}
+      <input type="text" name="ollama_model" value="{{ values.ollama_model }}" placeholder="gemma3:4b"></label>
   </div>
   <small class="muted">Run <code>ollama serve</code> and <code>ollama pull {{ values.ollama_model or 'gemma3:4b' }}</code>. Verify the tag with <code>ollama list</code>.</small>
 
   <h4>Behaviour</h4>
   <div class="grid-2">
-    <label>Max matches emailed per run<input type="number" name="max_results_per_run" value="{{ values.max_results_per_run }}"></label>
-    <label style="align-self:end;"><input type="checkbox" name="seed_mode" {{ 'checked' if values.seed_mode else '' }}> Seed mode (don't email pre-existing listings on a watch's first run)</label>
+    <label>Max matches emailed per run{{ hint('Caps how many new matches get processed and notified about in a single run, so a large first scan doesn\'t flood you with notifications or overload the AI step.') }}
+      <input type="number" name="max_results_per_run" value="{{ values.max_results_per_run }}"></label>
+    <label style="align-self:end;"><input type="checkbox" name="seed_mode" {{ 'checked' if values.seed_mode else '' }}> Seed mode (don't email pre-existing listings on a watch's first run){{ hint("On a watch's very first run, marks all currently-matching listings as already seen instead of notifying about every one of them at once. Later runs only notify about genuinely new listings.") }}</label>
   </div>
 
   <h4>Browser (marketplace scanning)</h4>
   <p class="muted">Ricardo.ch is scanned by driving a real Chrome like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in. (tutti, AutoScout24 and Facebook use their own methods and ignore these settings.)</p>
   <div class="grid-2">
-    <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible Chrome</label>
-    <label>Listings opened per site per run<input type="number" name="browser_max_items_per_run" value="{{ values.browser_max_items_per_run }}"></label>
-    <label>Min delay between listings (s)<input type="number" step="0.5" name="browser_min_delay" value="{{ values.browser_min_delay }}"></label>
-    <label>Max delay between listings (s)<input type="number" step="0.5" name="browser_max_delay" value="{{ values.browser_max_delay }}"></label>
+    <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible Chrome{{ hint('Runs the automated Chrome window hidden in the background instead of visibly on screen. Hidden mode is more likely to get flagged by bot-detection, so leave it off unless you need a fully background setup.') }}</label>
+    <label>Listings opened per site per run{{ hint('Maximum number of individual listing pages opened per marketplace, per run, when scanning via the browser.') }}
+      <input type="number" name="browser_max_items_per_run" value="{{ values.browser_max_items_per_run }}"></label>
+    <label>Min delay between listings (s){{ hint('Minimum random pause (in seconds) between opening consecutive listings, to look less like an automated script.') }}
+      <input type="number" step="0.5" name="browser_min_delay" value="{{ values.browser_min_delay }}"></label>
+    <label>Max delay between listings (s){{ hint('Maximum random pause (in seconds) between opening consecutive listings -- paired with the minimum above to form the random delay range.') }}
+      <input type="number" step="0.5" name="browser_max_delay" value="{{ values.browser_max_delay }}"></label>
   </div>
   <small class="muted">First-time setup: <code>pipenv install &amp;&amp; pipenv run browsers</code> (installs patchright + Chrome). If Ricardo shows a "checking your browser" step, clear it once with <code>pipenv run solve ricardo</code>. tutti.ch and AutoScout24.ch don't need any of this — they use public APIs directly, no browser involved.</small>
 
@@ -57,8 +95,10 @@
   <h4>Facebook login</h4>
   <p class="note">⚠️ Automating Facebook violates its Terms and can get your account locked or banned. <strong>Recommended:</strong> log in once manually by running <code>python -m deal_finder.browser.fb_login</code> — no password is stored. The fields below are an optional auto-login fallback (less safe; 2FA still needs a manual step).</p>
   <div class="grid-2">
-    <label>Facebook email<input type="text" name="facebook_email" value="{{ values.facebook_email }}"></label>
-    <label>Facebook password<input type="password" name="facebook_password" value="{{ '********' if values.facebook_password else '' }}"></label>
+    <label>Facebook email{{ hint('Your Facebook account email, used only for the optional automatic-login fallback. Prefer running python -m deal_finder.browser.fb_login once instead.') }}
+      <input type="text" name="facebook_email" value="{{ values.facebook_email }}"></label>
+    <label>Facebook password{{ hint('Your Facebook account password, used only for the optional automatic-login fallback -- stored in the database. Prefer the manual login script above to avoid storing this at all.') }}
+      <input type="password" name="facebook_password" value="{{ '********' if values.facebook_password else '' }}"></label>
   </div>
 
   <button type="submit">Save settings</button>

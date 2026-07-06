@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     ollama_model: str = "gemma3:4b"
     ollama_timeout: float = 120.0
 
+    # --- Telegram (optional alternative to email; per-watch choice) ---
+    telegram_bot_token: str = ""          # from @BotFather
+    telegram_default_chat_id: str = ""    # prefills new watches, like default_notify_email
+
     # --- Behaviour ---
     default_notify_email: str = ""
     max_results_per_run: int = 50
@@ -87,6 +91,8 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "ai_enabled",
     "ollama_base_url",
     "ollama_model",
+    "telegram_bot_token",
+    "telegram_default_chat_id",
     "default_notify_email",
     "seed_mode",
     "max_results_per_run",

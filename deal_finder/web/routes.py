@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from ..config import EDITABLE_KEYS
 from ..db import get_session, load_setting_overrides, runtime_settings
 from ..models import AppSetting, NotificationLog, SeenListing, Watch
+from ..progress import get_status
 from ..registry import get_category, list_adapters, list_categories
 from ..scheduler import next_run_time
 from .. import service
@@ -48,6 +49,8 @@ def _parse_watch_form(form) -> dict:
         "search_params": search_params,
         "filters": filters,
         "notify_email": form.get("notify_email", "").strip(),
+        "notify_channel": form.get("notify_channel", "telegram"),
+        "telegram_chat_id": form.get("telegram_chat_id", "").strip(),
         "questions": questions,
     }
 
@@ -82,10 +85,12 @@ def _render_form(request: Request, session: Session, watch: Watch | None):
         selected_mkt = [a.key for a in adapters if a.enabled_by_default]
         questions_text = "\n".join(category.default_questions)
         default_email = settings.default_notify_email
+        default_chat_id = settings.telegram_default_chat_id
     else:
         selected_mkt = watch.marketplaces
         questions_text = "\n".join(watch.questions)
         default_email = watch.notify_email
+        default_chat_id = watch.telegram_chat_id or settings.telegram_default_chat_id
     return templates.TemplateResponse(
         request,
         "watch_form.html",
@@ -98,6 +103,7 @@ def _render_form(request: Request, session: Session, watch: Watch | None):
             "selected_mkt": selected_mkt,
             "questions_text": questions_text,
             "default_email": default_email,
+            "default_chat_id": default_chat_id,
         },
     )
 
@@ -142,6 +148,13 @@ def watch_detail(watch_id: int, request: Request, session: Session = Depends(get
     return _render_detail(request, session, watch_id, run_result=None)
 
 
+@router.get("/watches/{watch_id}/run-status")
+def run_status(watch_id: int) -> dict:
+    """Polled by the watch detail page while a 'Run now' request is in flight, to show
+    a live status message (see progress.py) alongside the indeterminate progress bar."""
+    return {"status": get_status(watch_id)}
+
+
 @router.post("/watches/{watch_id}/run-now", response_class=HTMLResponse)
 async def run_now_form(
     watch_id: int, request: Request, session: Session = Depends(get_session)
@@ -149,10 +162,11 @@ async def run_now_form(
     watch = _get_watch_or_404(session, watch_id)
     form = await request.form()
     dry_run = form.get("dry_run") == "on"
-    send_email = form.get("send_email") == "on" and not dry_run  # dry run never emails
+    # Form field name kept as "send_email" for compatibility; means "notify" (any channel).
+    notify = form.get("send_email") == "on" and not dry_run  # dry run never notifies
     # Run the blocking pipeline off the event loop.
     result = await run_in_threadpool(
-        service.run_now, session, watch, send_email=send_email, test_mode=True, dry_run=dry_run
+        service.run_now, session, watch, notify=notify, test_mode=True, dry_run=dry_run
     )
     return _render_detail(request, session, watch_id, run_result=result)
 
@@ -213,7 +227,7 @@ _BOOL_SETTINGS = {
     "adapter_autoscout24_enabled",
     "adapter_facebook_enabled",
 }
-_MASKED_SETTINGS = {"smtp_password", "facebook_password"}
+_MASKED_SETTINGS = {"smtp_password", "facebook_password", "telegram_bot_token"}
 
 
 @router.post("/settings")

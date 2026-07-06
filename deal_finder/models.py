@@ -39,6 +39,11 @@ class Watch(SQLModel, table=True):
     filters: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
     notify_email: str = ""
+    # Which channel to notify through: "email" or "telegram" (default).
+    notify_channel: str = "telegram"
+    # Chat ID to message via the Telegram bot (see Settings -> Telegram). Falls back to
+    # settings.telegram_default_chat_id when creating a new watch, same pattern as notify_email.
+    telegram_chat_id: str = ""
     # Predefined questions answered by the local AI from each listing's text.
     questions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
@@ -72,11 +77,14 @@ class SeenListing(SQLModel, table=True):
 
 
 class NotificationLog(SQLModel, table=True):
-    """One row per email send attempt (success or failure)."""
+    """One row per notification send attempt (success or failure), for any channel."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
     watch_id: int = Field(foreign_key="watch.id", index=True)
+    # Recipient address: an email address or a Telegram chat ID, depending on `channel`.
+    # Field name kept as `email_to` (not renamed) to avoid a RENAME COLUMN migration.
     email_to: str = ""
+    channel: str = "email"  # "email" | "telegram"
     subject: str = ""
     num_matches: int = 0
     success: bool = False

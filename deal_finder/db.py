@@ -28,11 +28,37 @@ def get_engine():
     return _engine
 
 
+# Lightweight, idempotent schema migrations: (table, column, DDL type+default).
+# create_all() only creates *missing tables*, never adds columns to tables that already
+# exist -- so a column added here in code needs an explicit ALTER TABLE for anyone who
+# already has a database from before that column existed. No migration framework (e.g.
+# Alembic) is in place yet; this simple list is a pragmatic fit for the project's current
+# size. Add one entry per new column; defaults must match the model field's default so
+# existing rows behave exactly as they did before the column existed.
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("watch", "notify_channel", "TEXT NOT NULL DEFAULT 'email'"),
+    ("watch", "telegram_chat_id", "TEXT NOT NULL DEFAULT ''"),
+    ("notificationlog", "channel", "TEXT NOT NULL DEFAULT 'email'"),
+]
+
+
+def _migrate_schema(engine) -> None:
+    """Add any missing columns from _MIGRATIONS. Safe to call on every startup: a fresh
+    database already has every column via create_all(), so this is a no-op there."""
+    with engine.begin() as conn:
+        for table, column, ddl in _MIGRATIONS:
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init_db() -> None:
-    """Create tables if they don't exist. Import models for side effects first."""
+    """Create tables if they don't exist, then apply any pending column migrations."""
     from . import models  # noqa: F401  (ensure model classes are registered)
 
-    SQLModel.metadata.create_all(get_engine())
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    _migrate_schema(engine)
 
 
 @contextmanager

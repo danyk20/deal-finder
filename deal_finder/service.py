@@ -88,14 +88,14 @@ def run_now(
     session: Session,
     watch: Watch,
     *,
-    send_email: bool = False,
+    notify: bool = False,
     test_mode: bool = True,
     dry_run: bool = False,
 ) -> RunResult:
-    """Manual run. Default = preview (no email, no DB writes).
+    """Manual run. Default = preview (no notification, no DB writes).
 
     test_mode=True treats all matches as new and writes nothing (idempotent testing).
-    dry_run=True opens every match in a local browser tab instead of emailing (and, like
+    dry_run=True opens every match in a local browser tab instead of notifying (and, like
     test_mode, never writes to the DB) -- see pipeline.run_watch for details.
     """
-    return run_watch(session, watch, send_email=send_email, ignore_seen=test_mode, dry_run=dry_run)
+    return run_watch(session, watch, notify=notify, ignore_seen=test_mode, dry_run=dry_run)
