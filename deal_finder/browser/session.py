@@ -175,6 +175,11 @@ class BrowserSession:
             viewport={"width": 1440, "height": 900},
             args=["--disable-blink-features=AutomationControlled"],
             ignore_default_args=["--enable-automation"],
+            # Playwright/patchright default chromium_sandbox to False, which always adds
+            # --no-sandbox -- itself a strong, highly visible automation fingerprint (and
+            # the reason a real Chrome launch still showed that warning banner). A real
+            # user's Chrome always runs sandboxed, so this must be explicitly re-enabled.
+            chromium_sandbox=True,
         )
         if channel:
             kwargs["channel"] = channel
