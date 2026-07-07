@@ -7,15 +7,9 @@ name = "pypi"
 # "facebook" pulls in facebook-marketplace-scraper (its own dedicated browser + login flow).
 # Every other marketplace adapter (tutti, Ricardo, AutoScout24) is a core dependency --
 # each wraps a self-contained PyPI package that manages its own access internally.
-#
-# NOTE: the "facebook" extra currently conflicts with ricardo-scraper's exact
-# playwright==1.60.0 pin (facebook-marketplace-scraper needs playwright~=1.61) -- left
-# out of the default install below until that's resolved. Install it explicitly with
-# `pipenv run pip install facebook-marketplace-scraper` if you accept the pinned-version
-# risk (untested combination), or once the upstream pin conflict is fixed.
 
 [packages]
-deal-finder = {path = ".", editable = true}
+deal-finder = {extras = ["facebook"], path = ".", editable = true}
 
 [dev-packages]
 pytest = ">=8"

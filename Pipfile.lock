@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "a0cb47bded17e587d6de699b6d694921e3bf1852118cc3ddca7238654d3e7c9a"
+            "sha256": "bcae83585ef920f7e011c90b5f749ab77b33fa9bff29a5619176b4b6fb93596b"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -63,6 +63,14 @@
             ],
             "markers": "python_version >= '3.11'",
             "version": "==0.1.0"
+        },
+        "beautifulsoup4": {
+            "hashes": [
+                "sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7",
+                "sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9"
+            ],
+            "markers": "python_full_version >= '3.7.0'",
+            "version": "==4.15.0"
         },
         "browserforge": {
             "hashes": [
@@ -254,7 +262,18 @@
         },
         "deal-finder": {
             "editable": true,
+            "extras": [
+                "facebook"
+            ],
             "path": "."
+        },
+        "facebook-marketplace-scraper": {
+            "hashes": [
+                "sha256:321c698ebd98a08cabdd6b28efe2d07e5cd84776fb0eae7849903b6d73c0c109",
+                "sha256:e9f3d22aacebf78e45e05b505be141ad1d812da3be4b24808426f467a9912542"
+            ],
+            "markers": "python_version >= '3.13'",
+            "version": "==0.2.0"
         },
         "fastapi": {
             "hashes": [
@@ -1150,6 +1169,14 @@
             "markers": "python_full_version >= '3.6.2' and python_full_version < '4.0.0'",
             "version": "==0.8.1"
         },
+        "soupsieve": {
+            "hashes": [
+                "sha256:e121fd02e975c695e4e9e8774a5ee35d74714b59307868dcc5319ad2d9e3328e",
+                "sha256:e7e6b0769c8f51ed59acab6e994b00621096cfb1c640a7509295987388fbaf65"
+            ],
+            "markers": "python_version >= '3.9'",
+            "version": "==2.8.4"
+        },
         "sqlalchemy": {
             "hashes": [
                 "sha256:0378d055e9e8cd6ce4d8dff683bdd3d7d413533c4ee51d67a2b1e0f9eacc0f23",
@@ -1240,11 +1267,11 @@
         },
         "tqdm": {
             "hashes": [
-                "sha256:00dfa48452b6b6cfae3dd9885636c23d3422d1ec97c66d96818cbd5e0821d482",
-                "sha256:39832cc2def2789a6f29df83f172db7416cea70052c0907a57801c5f2fdccb03"
+                "sha256:19829c9673638f2a0b8617da4cdcb927e831cd88bcfcb6e78d42a4d1af131520",
+                "sha256:5168118b2368f48c561afda8020fd79195b1bdb0bdf8086b88442c267a315dc2"
             ],
             "markers": "python_version >= '3.8'",
-            "version": "==4.68.3"
+            "version": "==4.68.4"
         },
         "tutti-scraper": {
             "hashes": [

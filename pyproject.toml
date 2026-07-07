@@ -34,7 +34,9 @@ dependencies = [
 # Playwright-based package with its own Python floor (>=3.13), so projects that don't
 # want Facebook scanning (and its ToS/ban risk) can skip it and stay on an older Python.
 # Installed by default via the Pipfile ("facebook" extra).
-facebook = ["facebook-marketplace-scraper>=0.1.0"]
+# >=0.2.0 pins playwright==1.60.0 (was ~=1.61), matching ricardo-scraper's exact pin --
+# 0.1.0 conflicted with ricardo-scraper and couldn't be installed alongside it.
+facebook = ["facebook-marketplace-scraper>=0.2.0"]
 dev = [
     "pytest>=8",
     "respx>=0.21",
