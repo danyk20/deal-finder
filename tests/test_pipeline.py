@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import threading
+
 from sqlmodel import select
 
 from deal_finder import pipeline
+from deal_finder.adapters.base import MarketplaceQuery
 from deal_finder.config import Settings
 from deal_finder.models import SeenListing, Watch
 
@@ -60,6 +63,42 @@ def test_email_failure_keeps_listing_unseen(session, monkeypatch):
     # Nothing recorded as seen -> will be retried next run.
     rows = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
     assert rows == []
+
+
+def test_search_isolated_runs_off_the_caller_thread():
+    """Each adapter.search() call must run on its own throwaway OS thread -- see
+    pipeline._search_isolated's docstring. A leaked/corrupted Playwright asyncio
+    thread-local from one adapter's browser session must not survive to the next
+    adapter call in the same watch run; running inline on the caller's thread (or
+    reusing one shared background thread across calls) would let it."""
+
+    class ThreadRecordingAdapter:
+        def search(self, query, settings=None):
+            return [threading.get_ident()]
+
+    caller_thread = threading.get_ident()
+    adapter = ThreadRecordingAdapter()
+    query = MarketplaceQuery(category="car")
+
+    first = pipeline._search_isolated(adapter, query, None)
+    second = pipeline._search_isolated(adapter, query, None)
+
+    assert first[0] != caller_thread
+    assert second[0] != caller_thread
+
+
+def test_search_isolated_propagates_adapter_exceptions():
+    from deal_finder.adapters.base import AdapterError
+
+    class BoomAdapter:
+        def search(self, query, settings=None):
+            raise AdapterError("kaboom")
+
+    try:
+        pipeline._search_isolated(BoomAdapter(), MarketplaceQuery(category="car"), None)
+        assert False, "expected AdapterError"
+    except AdapterError as exc:
+        assert str(exc) == "kaboom"
 
 
 def test_adapter_error_is_isolated(session, monkeypatch):

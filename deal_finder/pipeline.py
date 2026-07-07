@@ -23,6 +23,7 @@ web/routes.py) and is simply mapped to ``notify=`` when calling into this module
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -85,6 +86,27 @@ def _adapter_enabled(key: str, settings: Settings) -> bool:
     }.get(key, True)
 
 
+def _search_isolated(adapter, query, settings: Settings) -> list[Listing]:
+    """Run one adapter's search() in a fresh, throwaway OS thread.
+
+    Ricardo and Facebook each drive their own Playwright sync-API session (Camoufox /
+    Chromium respectively). Playwright's sync API tracks "is an event loop running on
+    this thread?" per-thread; if one adapter's browser session doesn't shut down
+    cleanly (observed after Ricardo hits a Cloudflare-challenge page-load timeout), that
+    can leave the *calling* thread's asyncio state looking like a loop is still running,
+    and the next adapter's own sync_playwright() call on that same thread then fails
+    with "Playwright Sync API inside the asyncio loop" -- even though nothing here
+    actually uses asyncio. _collect_listings otherwise runs every adapter sequentially
+    on one thread (itself already off the app's event loop -- see run_watch's callers),
+    so one adapter's cleanup bug would corrupt every adapter after it in the same run.
+    A dedicated ThreadPoolExecutor per call guarantees each adapter gets a brand new
+    thread (and therefore clean asyncio thread-local state), and the old one is joined
+    and discarded before the next adapter starts.
+    """
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: list(adapter.search(query, settings))).result()
+
+
 def _collect_listings(watch: Watch, query, category, result: RunResult, settings: Settings) -> list[Listing]:
     # Resolve which selected adapters actually run (known, supports category, enabled).
     plan: list[tuple[str, object]] = []
@@ -103,7 +125,7 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
     for key, adapter in plan:
         progress.set_status(watch.id, f"Searching {getattr(adapter, 'label', key)}…")
         try:
-            found = list(adapter.search(query, settings))
+            found = _search_isolated(adapter, query, settings)
             listings.extend(found)
             result.adapter_status[key] = f"ok ({len(found)})"
         except AdapterError as exc:
