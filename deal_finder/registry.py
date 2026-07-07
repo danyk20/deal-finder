@@ -3,12 +3,12 @@
 To add a category or marketplace, import it here and add an instance to the list.
 Everything else in the app discovers them through these functions.
 
-Ricardo is browser-driven (real headful Chrome, one listing at a time) via deal_finder's
-shared browser/ infra, to bypass bot detection. tutti, AutoScout24 and Facebook are plain
-adapters from the pipeline's point of view: each wraps a dedicated PyPI package that
-manages its own access internally (tutti and AutoScout24 call genuinely public JSON/GraphQL
-APIs; Facebook drives its own separate Playwright browser + login flow). The offline Demo
-adapter is also plain HTTP (canned data).
+tutti, Ricardo, AutoScout24 and Facebook are all plain adapters from the pipeline's point
+of view: each wraps a dedicated PyPI package that manages its own access internally
+(tutti and AutoScout24 call genuinely public JSON/GraphQL APIs; Ricardo drives its own
+bundled anti-fingerprinting Camoufox browser to get past Cloudflare; Facebook drives its
+own separate Playwright browser + login flow). None of them need deal_finder's own
+shared browser session. The offline Demo adapter is also plain HTTP (canned data).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from .adapters.autoscout24 import AutoScout24Adapter
 from .adapters.base import BaseAdapter
 from .adapters.demo import DemoAdapter
 from .adapters.facebook import FacebookAdapter
-from .adapters.ricardo import RicardoBrowserAdapter
+from .adapters.ricardo import RicardoAdapter
 from .adapters.tutti import TuttiAdapter
 from .categories.base import BaseCategory
 from .categories.car import CarCategory
@@ -28,7 +28,7 @@ ADAPTERS: dict[str, BaseAdapter] = {
     a.key: a
     for a in (
         TuttiAdapter(),
-        RicardoBrowserAdapter(),
+        RicardoAdapter(),
         AutoScout24Adapter(),
         FacebookAdapter(),
         DemoAdapter(),

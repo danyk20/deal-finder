@@ -50,35 +50,12 @@ class Settings(BaseSettings):
     http_user_agent: str = "DealFinder/0.1 (personal monitoring)"
     request_timeout: float = 20.0
 
-    # --- Browser automation (shared by browser-driven adapters) ---
-    # "webkit" (default) drives Safari's real engine via Playwright -- confirmed by direct
-    # testing to sail through Ricardo's Cloudflare challenge most of the time with no
-    # stealth patches, while even a real, sandboxed, patched Chrome ("chromium") reliably
-    # gets challenged. "chromium" is kept as a fallback for sites that need Chrome-only
-    # features. "safari" drives your REAL Safari.app via AppleScript instead of any
-    # browser-automation protocol at all -- no tool-driven browser can avoid the
-    # WebDriver-spec-mandated navigator.webdriver flag, but AppleScript's `do JavaScript`
-    # sidesteps the whole problem by not using WebDriver/CDP in the first place. Confirmed
-    # far more reliable against Ricardo than "webkit", but requires a one-time,
-    # security-relevant opt-in deal_finder never sets for you (see
-    # browser/safari_applescript.py's docstring). Uses your real Safari application
-    # rather than an isolated automation profile, though the window is positioned
-    # off-screen so it's never visible or focus-stealing.
-    browser_engine: str = "webkit"           # "webkit" | "chromium" | "safari"
-    browser_headless: bool = False           # headful helps vs. Akamai/Meta; Mac has a display
-    browser_channel: str = "chrome"          # chromium only: "chrome"|"msedge"|"" (bundled Chromium)
-    browser_profile_dir: str = "~/.deal_finder/profiles"
-    browser_user_agent: str = ""             # "" -> a realistic default UA for the chosen engine
-    browser_max_items_per_run: int = 15      # detail pages opened one-at-a-time, per site, per run
-    browser_search_pages: int = 2            # search-result pages to page through
-    browser_min_delay: float = 2.5
-    browser_max_delay: float = 6.0
-    browser_nav_timeout: float = 45.0
-    browser_proxy_url: str = ""              # optional CH residential proxy; "" = direct
-    # chromium only: use patchright (patched Playwright) when available: hides the
-    # CDP/automation signals Cloudflare/Turnstile detect. Falls back to stock Playwright
-    # if patchright isn't installed. Irrelevant when browser_engine == "webkit".
-    browser_use_patchright: bool = True
+    # --- Scraping limits (shared by every adapter) ---
+    # Kept the "browser_" prefix for backward compatibility with existing stored DB
+    # overrides, even though no adapter drives its own browser session anymore -- each
+    # wraps a dedicated PyPI package (tutti-scraper, ricardo-scraper, autoscout24-scraper,
+    # facebook-marketplace-scraper) that manages its own access internally.
+    browser_max_items_per_run: int = 15
 
     # --- Per-adapter enable (which marketplaces a run may touch) ---
     adapter_tutti_enabled: bool = True        # plain public GraphQL API; no browser involved
@@ -110,12 +87,8 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "default_notify_email",
     "seed_mode",
     "max_results_per_run",
-    # browser + adapters
-    "browser_engine",
-    "browser_headless",
     "browser_max_items_per_run",
-    "browser_min_delay",
-    "browser_max_delay",
+    # adapters
     "adapter_tutti_enabled",
     "adapter_ricardo_enabled",
     "adapter_autoscout24_enabled",

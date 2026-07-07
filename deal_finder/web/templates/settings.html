@@ -65,26 +65,12 @@
     <label style="align-self:end;"><input type="checkbox" name="seed_mode" {{ 'checked' if values.seed_mode else '' }}> Seed mode (don't email pre-existing listings on a watch's first run){{ hint("On a watch's very first run, marks all currently-matching listings as already seen instead of notifying about every one of them at once. Later runs only notify about genuinely new listings.") }}</label>
   </div>
 
-  <h4>Browser (marketplace scanning)</h4>
-  <p class="muted">Ricardo.ch is scanned by driving a real browser like a human — opening the search page and each listing one at a time. Keep the Mac awake &amp; logged in. (tutti, AutoScout24 and Facebook use their own methods and ignore these settings.)</p>
+  <h4>Scraping limits</h4>
+  <p class="muted">tutti.ch, Ricardo.ch, AutoScout24.ch and Facebook Marketplace each use their own dedicated package to fetch listings — no shared browser setup needed.</p>
   <div class="grid-2">
-    <label>Browser engine{{ hint("webkit sails through Ricardo's Cloudflare challenge most of the time with no extra setup, chromium gets challenged reliably, and safari (your real Safari.app, via AppleScript) is the most reliable of the three but requires a one-time terminal command -- see the note below. It briefly uses a Safari window during each scan, positioned off-screen so it never appears or steals focus.") }}
-      <select name="browser_engine">
-        <option value="webkit" {{ 'selected' if values.browser_engine == 'webkit' else '' }}>webkit (Safari engine, no setup needed)</option>
-        <option value="safari" {{ 'selected' if values.browser_engine == 'safari' else '' }}>safari (real Safari.app, most reliable, requires setup)</option>
-        <option value="chromium" {{ 'selected' if values.browser_engine == 'chromium' else '' }}>chromium (Chrome)</option>
-      </select>
-    </label>
-    <label style="align-self:end;"><input type="checkbox" name="browser_headless" {{ 'checked' if values.browser_headless else '' }}> Headless (hidden) — less reliable vs. bot-detection; leave OFF for a visible browser{{ hint('Runs the automated browser window hidden in the background instead of visibly on screen. Hidden mode is more likely to get flagged by bot-detection, so leave it off unless you need a fully background setup.') }}</label>
-    <label>Listings opened per site per run{{ hint('Maximum number of individual listing pages opened per marketplace, per run, when scanning via the browser.') }}
+    <label>Listings scraped per site per run{{ hint('Maximum number of individual listings fetched per marketplace, per run, to avoid a large first scan overloading a run or the AI enrichment step.') }}
       <input type="number" name="browser_max_items_per_run" value="{{ values.browser_max_items_per_run }}"></label>
-    <label>Min delay between listings (s){{ hint('Minimum random pause (in seconds) between opening consecutive listings, to look less like an automated script.') }}
-      <input type="number" step="0.5" name="browser_min_delay" value="{{ values.browser_min_delay }}"></label>
-    <label>Max delay between listings (s){{ hint('Maximum random pause (in seconds) between opening consecutive listings -- paired with the minimum above to form the random delay range.') }}
-      <input type="number" step="0.5" name="browser_max_delay" value="{{ values.browser_max_delay }}"></label>
   </div>
-  <small class="muted">First-time setup: <code>pipenv install &amp;&amp; pipenv run browsers</code> (installs patchright + Chrome). If Ricardo shows a "checking your browser" step, clear it once with <code>pipenv run solve ricardo</code>. tutti.ch and AutoScout24.ch don't need any of this — they use public APIs directly, no browser involved.</small>
-  <p class="note">⚠️ The "safari" engine drives your real Safari.app and needs a one-time terminal command: <code>defaults write com.apple.Safari AllowJavaScriptFromAppleEvents -bool true</code>. This lets any AppleScript-capable process run JavaScript in your open Safari pages — a real, if narrow, reduction in Safari's isolation. Only enable it if you're comfortable with that tradeoff. Each scan briefly uses a Safari window positioned off-screen (never visible, never steals focus), but it's still your real Safari application underneath — avoid this engine if you need Safari fully free for other things at the exact same moment.</p>
 
   <h4>Marketplaces enabled</h4>
   <fieldset>
@@ -92,7 +78,10 @@
       <span class="check-row-main"><input type="checkbox" name="adapter_tutti_enabled" {{ 'checked' if values.adapter_tutti_enabled else '' }}> tutti.ch</span>
       <small class="check-row-hint">Public GraphQL API, no browser or bypass needed.</small>
     </label>
-    <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_ricardo_enabled" {{ 'checked' if values.adapter_ricardo_enabled else '' }}> Ricardo.ch</span></label>
+    <label class="check-row">
+      <span class="check-row-main"><input type="checkbox" name="adapter_ricardo_enabled" {{ 'checked' if values.adapter_ricardo_enabled else '' }}> Ricardo.ch</span>
+      <small class="check-row-hint">Via the ricardo-scraper package (its own bundled anti-fingerprinting browser) — no shared browser setup needed.</small>
+    </label>
     <label class="check-row">
       <span class="check-row-main"><input type="checkbox" name="adapter_autoscout24_enabled" {{ 'checked' if values.adapter_autoscout24_enabled else '' }}> AutoScout24.ch</span>
       <small class="check-row-hint">Public JSON API, no browser or bypass needed.</small>

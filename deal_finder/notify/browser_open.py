@@ -2,7 +2,7 @@
 
 Uses the stdlib ``webbrowser`` module, which opens tabs in the default browser on the
 machine running the app (this is a personal, locally-run tool, so that's the user's own
-machine). No dependency on the internal Playwright/patchright automation layer at all.
+machine). No dependency on any marketplace adapter's scraping package.
 """
 
 from __future__ import annotations

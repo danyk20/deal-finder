@@ -64,7 +64,17 @@ class AdapterError(Exception):
     """Recoverable adapter failure (network error, bot challenge, parse problem).
 
     The pipeline catches this per-adapter so one marketplace failing never aborts a run.
+
+    ``partial_listings`` lets an adapter that fails partway through a multi-item fetch
+    (e.g. a bot-wall hit after some listings' details were already retrieved) attach
+    whatever it already collected, so the pipeline keeps those results instead of
+    discarding a run's worth of successful work over one later failure -- see
+    pipeline.py's _collect_listings.
     """
+
+    def __init__(self, message: str, *, partial_listings: list | None = None):
+        super().__init__(message)
+        self.partial_listings = partial_listings or []
 
 
 class BaseAdapter:

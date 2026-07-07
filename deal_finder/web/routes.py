@@ -221,7 +221,6 @@ _BOOL_SETTINGS = {
     "smtp_starttls",
     "ai_enabled",
     "seed_mode",
-    "browser_headless",
     "adapter_tutti_enabled",
     "adapter_ricardo_enabled",
     "adapter_autoscout24_enabled",

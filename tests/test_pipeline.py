@@ -86,12 +86,11 @@ def test_adapter_error_is_isolated(session, monkeypatch):
 
 
 def test_adapter_bot_wall_keeps_partial_listings(session, monkeypatch):
-    """A browser adapter that hits a bot-wall partway through should still contribute
-    whatever it fetched before the wall, via BotWallError.partial_listings, instead of
+    """An adapter that fails partway through a multi-item fetch should still contribute
+    whatever it fetched before failing, via AdapterError.partial_listings, instead of
     losing that run's work entirely -- see pipeline.py::_collect_listings."""
     from deal_finder import registry
-    from deal_finder.adapters.base import BaseAdapter, Listing
-    from deal_finder.browser.errors import BotWallError
+    from deal_finder.adapters.base import AdapterError, BaseAdapter, Listing
 
     partial = [
         Listing(marketplace="wally", external_id="1", url="https://x/1", title="Tesla A", price=40000),
@@ -104,7 +103,7 @@ def test_adapter_bot_wall_keeps_partial_listings(session, monkeypatch):
         supported_categories = {"car"}
 
         def search(self, query):
-            raise BotWallError("wally: HTTP 403 (bot-wall / rate-limited)", partial_listings=partial)
+            raise AdapterError("wally: HTTP 403 (bot-wall / rate-limited)", partial_listings=partial)
 
     monkeypatch.setitem(registry.ADAPTERS, "wally", WalledAdapter())
     monkeypatch.setattr(pipeline, "send_match_email", lambda *a, **k: None)
@@ -122,28 +121,6 @@ def test_preview_writes_nothing(session):
     assert res.matched > 0 and res.matches_preview
     rows = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
     assert rows == []
-
-
-def test_browser_session_imports_browser_layer(monkeypatch):
-    """Regression: _browser_session must import deal_finder.browser with a SINGLE dot.
-    A '..browser' typo raised 'attempted relative import beyond top-level package', which
-    was swallowed into a None session so every browser adapter (tutti/Ricardo) failed with
-    an opaque 'no browser session available'. Mocks avoid launching a real browser."""
-    import deal_finder.browser as browser_mod
-
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(browser_mod, "is_available", lambda: True)
-    monkeypatch.setattr(browser_mod, "BrowserSession", lambda cfg: _FakeSession())
-
-    with pipeline._browser_session(Settings()) as (browser, error):
-        assert error is None, f"browser layer should import cleanly, got: {error}"
-        assert browser is not None
 
 
 def test_top_level_modules_use_single_dot_imports():

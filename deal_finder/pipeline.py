@@ -22,7 +22,6 @@ web/routes.py) and is simply mapped to ``notify=`` when calling into this module
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -86,38 +85,6 @@ def _adapter_enabled(key: str, settings: Settings) -> bool:
     }.get(key, True)
 
 
-@contextlib.contextmanager
-def _browser_session(settings: Settings):
-    """Yield ``(session, error)``: a live BrowserSession with error=None, or (None, reason)
-    if Playwright is missing / the browser won't launch. Never raises on launch failure,
-    so httpx adapters still run and the reason is surfaced per-adapter (not just swallowed).
-    """
-    try:
-        from .browser import BrowserConfig, BrowserSession, is_available
-    except Exception as exc:  # noqa: BLE001
-        yield None, f"browser layer import failed: {exc}"
-        return
-    if not is_available():
-        yield None, "no browser backend installed (run: pipenv install && pipenv run browsers)"
-        return
-    try:
-        session = BrowserSession(BrowserConfig.from_settings(settings))
-        session.__enter__()
-    except Exception as exc:  # noqa: BLE001 - launch failure -> browser adapters degrade
-        log.warning("browser launch failed: %s", exc, exc_info=True)
-        yield None, f"browser launch failed: {exc}"
-        return
-    # Launch succeeded. Body exceptions propagate normally (each adapter is wrapped in its
-    # own try/except in _collect_listings, so this yields cleanly); teardown in finally.
-    try:
-        yield session, None
-    finally:
-        try:
-            session.__exit__(None, None, None)
-        except Exception:  # noqa: BLE001
-            pass
-
-
 def _collect_listings(watch: Watch, query, category, result: RunResult, settings: Settings) -> list[Listing]:
     # Resolve which selected adapters actually run (known, supports category, enabled).
     plan: list[tuple[str, object]] = []
@@ -132,43 +99,28 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
         else:
             plan.append((key, adapter))
 
-    def _needs_browser(a) -> bool:
-        fn = getattr(a, "needs_browser", None)
-        return fn(settings) if callable(fn) else getattr(a, "requires_browser", False)
-
-    needs_browser = any(_needs_browser(a) for _, a in plan)
     listings: list[Listing] = []
-
-    cm = _browser_session(settings) if needs_browser else contextlib.nullcontext((None, None))
-    with cm as (browser, browser_error):
-        for key, adapter in plan:
-            progress.set_status(watch.id, f"Searching {getattr(adapter, 'label', key)}…")
-            try:
-                if getattr(adapter, "requires_browser", False):
-                    if browser is None:
-                        # This adapter needs a browser but none launched — surface the real
-                        # reason instead of the adapter's opaque "no browser session".
-                        raise AdapterError(browser_error or "browser not available for this run")
-                    found = list(adapter.search(query, browser=browser, settings=settings))
-                else:
-                    found = list(adapter.search(query))
-                listings.extend(found)
-                result.adapter_status[key] = f"ok ({len(found)})"
-            except AdapterError as exc:
-                # A BotWallError raised partway through a browser adapter's run may carry
-                # whatever listings it already fetched successfully before hitting the
-                # wall (see BotWallError.partial_listings) -- keep those rather than
-                # discarding a run's worth of successful work over one later failure.
-                partial = getattr(exc, "partial_listings", None)
-                if partial:
-                    listings.extend(partial)
-                    result.adapter_status[key] = f"partial ({len(partial)}): {exc}"
-                else:
-                    result.adapter_status[key] = f"error: {exc}"
-                log.warning("adapter %s failed for watch %s: %s", key, watch.id, exc)
-            except Exception as exc:  # noqa: BLE001 - never let one adapter abort the run
-                result.adapter_status[key] = f"error: {exc!r}"
-                log.exception("adapter %s crashed for watch %s", key, watch.id)
+    for key, adapter in plan:
+        progress.set_status(watch.id, f"Searching {getattr(adapter, 'label', key)}…")
+        try:
+            found = list(adapter.search(query))
+            listings.extend(found)
+            result.adapter_status[key] = f"ok ({len(found)})"
+        except AdapterError as exc:
+            # A partial-run error (e.g. a bot-wall hit partway through) may carry
+            # whatever listings the adapter already fetched successfully before failing
+            # (see AdapterError.partial_listings) -- keep those rather than discarding a
+            # run's worth of successful work over one later failure.
+            partial = getattr(exc, "partial_listings", None)
+            if partial:
+                listings.extend(partial)
+                result.adapter_status[key] = f"partial ({len(partial)}): {exc}"
+            else:
+                result.adapter_status[key] = f"error: {exc}"
+            log.warning("adapter %s failed for watch %s: %s", key, watch.id, exc)
+        except Exception as exc:  # noqa: BLE001 - never let one adapter abort the run
+            result.adapter_status[key] = f"error: {exc!r}"
+            log.exception("adapter %s crashed for watch %s", key, watch.id)
     return listings
 
 

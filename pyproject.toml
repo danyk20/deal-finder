@@ -13,7 +13,6 @@ dependencies = [
     "sqlmodel>=0.0.16",
     "apscheduler>=3.10,<4",
     "httpx>=0.27",
-    "selectolax>=0.3",
     "pydantic-settings>=2.1",
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
@@ -24,17 +23,17 @@ dependencies = [
     # tutti.ch: calls tutti's own public GraphQL API directly (tutti.ch/api/v10/graphql)
     # — plain requests, no browser or anti-bot bypass needed for that adapter.
     "tutti-scraper>=0.2.0",
+    # Ricardo.ch: drives its own bundled, anti-fingerprinting Camoufox browser to get
+    # past Cloudflare's Managed Challenge — self-contained, no shared deal_finder
+    # browser session/profile needed for this adapter anymore.
+    "ricardo-scraper>=0.2.0",
 ]
 
 [project.optional-dependencies]
-# Browser-driven adapters. patchright is a drop-in patched Playwright that evades
-# Cloudflare/Turnstile detection; playwright is kept as a fallback. Installed by default
-# via the Pipfile ("browser" extra). Standalone: pip install -e ".[browser]" && patchright install chrome
-browser = ["patchright>=1.40", "playwright>=1.40"]
-# Facebook Marketplace adapter: a separate extra (not part of "browser") because it pulls
-# in its own dedicated Playwright-based package with its own Python floor (>=3.13), so
-# projects that don't want Facebook scanning (and its ToS/ban risk) can skip it and stay
-# on an older Python. Installed by default via the Pipfile ("facebook" extra).
+# Facebook Marketplace adapter: a separate extra because it pulls in its own dedicated
+# Playwright-based package with its own Python floor (>=3.13), so projects that don't
+# want Facebook scanning (and its ToS/ban risk) can skip it and stay on an older Python.
+# Installed by default via the Pipfile ("facebook" extra).
 facebook = ["facebook-marketplace-scraper>=0.1.0"]
 dev = [
     "pytest>=8",

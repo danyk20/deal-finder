@@ -10,17 +10,18 @@ Controlled through a small **FastAPI** app with a **server-rendered web UI** (Ji
 HTMX) and a JSON API. Built to extend to new item types (houses, phones, …) and new
 marketplaces by dropping in one file.
 
-> **Status:** framework, matching, dedup, scheduling, local-AI enrichment, email, API and
-> UI are complete and tested. **Ricardo** is scanned by **driving a real Chrome like a
-> human** (via **patchright** — a patched Playwright that evades bot detection — with a
-> persistent profile, opening the search page then each listing one at a time with random
-> delays; works but may rate-limit under frequent access). **tutti.ch**, **AutoScout24**
-> and **Facebook** each wrap a dedicated PyPI package that manages its own access: tutti
-> ([tutti-scraper](https://pypi.org/project/tutti-scraper/)) and AutoScout24
-> ([autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/)) call the sites'
-> own public GraphQL/JSON APIs directly — no browser or bypass needed at all, both
-> verified end-to-end; Facebook drives its own separate Playwright browser and login flow
-> ([facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/))
+> **Status:** framework, matching, dedup, scheduling, local-AI enrichment, email,
+> Telegram, API and UI are complete and tested. Every marketplace adapter wraps a
+> dedicated PyPI package that manages its own access internally — deal_finder itself
+> drives no browser at all anymore. **tutti.ch** and **AutoScout24** call the sites' own
+> public GraphQL/JSON APIs directly via
+> [tutti-scraper](https://pypi.org/project/tutti-scraper/) and
+> [autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/) — no browser or
+> bypass needed at all, both verified end-to-end. **Ricardo.ch** uses
+> [ricardo-scraper](https://pypi.org/project/ricardo-scraper/), which drives its own
+> bundled anti-fingerprinting Camoufox browser to get past Cloudflare's Managed
+> Challenge. **Facebook** drives its own separate Playwright browser and login flow via
+> [facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/)
 > — on by default, needs a one-time login, and carries ToS/ban risk. See
 > [Marketplaces](#marketplaces).
 
@@ -31,39 +32,35 @@ This project uses **[Pipenv](https://pipenv.pypa.io)** (Python 3.11+; 3.13 recom
 ```bash
 cd deal_finder
 export PIPENV_VENV_IN_PROJECT=1            # keep the virtualenv in ./.venv (recommended)
-pipenv install --dev                       # create the venv + install deps (patchright, facebook-marketplace-scraper, ...)
-pipenv run browsers                        # = patchright install chrome (real Chrome channel)
+pipenv install --dev                       # create the venv + install deps
 
 cp .env.example .env                       # edit SMTP + Ollama (or set them later in the UI)
 
 pipenv run dev                             # start the app at http://127.0.0.1:8000 (--reload)
-pipenv run test                            # run the test suite (offline; no browser needed)
+pipenv run test                            # run the test suite (offline)
 ```
 
 `pipenv shell` drops you into the environment (then `uvicorn …`, `pytest` work directly).
 Handy shortcuts are defined in the `Pipfile` `[scripts]`: `dev`, `start`, `test`,
-`browsers`, `fb-login`, `solve` — run any with `pipenv run <name>`.
+`fb-login`, `telegram-chat-id` — run any with `pipenv run <name>`.
 
-If Ricardo ever shows a "checking your browser" / "I'm not a robot" step, clear it **once**
-yourself in a visible window — the cleared session persists in the browser profile and
-scheduled scans reuse it: `pipenv run solve ricardo`. Deal Finder never solves challenges
-itself. tutti and AutoScout24 (public APIs) and Facebook (its own dedicated package — see
-below) don't use this shared browser session, so this never applies to them.
+Facebook Marketplace needs a one-time manual login (stores no password):
+`pipenv run fb-login`. tutti, Ricardo and AutoScout24 need no setup at all — each calls
+its own dedicated package directly.
 
 Open http://127.0.0.1:8000, create a watch (Make `Tesla`, Model `Model S`, price/year
-filters, your email, pick marketplaces), then **Run now**. Use the **Demo** marketplace to
-see the whole pipeline offline without a browser.
+filters, your email or Telegram, pick marketplaces), then **Run now**. Use the **Demo**
+marketplace to see the whole pipeline offline without any network calls.
 
-On the watch page, **Run now** has two independent checkboxes: **send test email**
-(emails the matches, like a real scan) and **dry run** (opens every match in a new local
-browser tab instead — no email, no AI enrichment, nothing written to the database; dry
-run always wins if both are checked). Handy for eyeballing results for a brand-new watch
-before trusting it to email you.
+On the watch page, **Run now** has two independent checkboxes: **send test notification**
+(sends via the watch's chosen channel — email or Telegram — like a real scan) and
+**dry run** (opens every match in a new local browser tab instead — no notification, no
+AI enrichment, nothing written to the database; dry run always wins if both are
+checked). Handy for eyeballing results for a brand-new watch before trusting it to
+notify you.
 
-> **Browser scanning** opens a **visible Chrome window** during each scan (best for bypassing
-> bot detection). Keep the Mac awake and logged in. Scans run at each watch's schedule; when
-> a site blocks a run it's logged and retried next time. Lower the scan frequency (e.g. daily)
-> to stay under rate limits.
+> Scans run at each watch's schedule; when a site blocks a run it's logged and retried
+> next time. Lower the scan frequency (e.g. daily) to stay under rate limits.
 
 ### Local AI (Ollama)
 
@@ -98,33 +95,27 @@ run_watch:  adapters.search()  ─>  filter (price/year/km/keywords/location)  �
   error is recorded and the others proceed. If email fails, the listing stays "unseen" and
   is retried next run.
 
-## How marketplace scanning works (browser-driven)
+## How marketplace scanning works
 
-Direct HTTP requests to these sites are bot-blocked (HTTP 403). Instead, each adapter
-drives a **real headful Chrome** via Playwright (`deal_finder/browser/`):
+deal_finder drives no browser of its own. Every adapter is a thin wrapper around a
+dedicated PyPI package that manages its own access to the target site (a public
+JSON/GraphQL API, or — for sites that need it — that package's own bundled/patched
+browser). The adapter maps whatever that package returns into a `Listing` and hands off
+to the same matching / dedup / AI / notify pipeline, regardless of source.
 
-1. Open a **persistent Chrome profile** (`~/.deal_finder/profiles/<site>`) — cookies and a
-   warmed profile persist across runs, which is what defeats bot detection.
-2. Navigate to the site's search page for your query.
-3. Collect listing links, then **open each listing one at a time** with a random
-   few-second delay between them — like a person browsing.
-4. Extract fields from each detail page (JSON-LD → OpenGraph meta → DOM), map to a
-   `Listing`, and hand off to the same matching / dedup / AI / email pipeline.
-
-If a site shows a bot-wall/CAPTCHA/login page, the adapter raises a typed error that the
-pipeline records and isolates — other sites still scan, and it retries next schedule.
-Tunables live in **Settings** / `.env` (`DF_BROWSER_*`): headless on/off, items per run,
-min/max delay, per-site enable.
+If a site's package raises (network error, bot-block, parse problem), the pipeline
+records it per-adapter and isolates it — other sites still scan, and it retries next
+schedule. Tunables live in **Settings** / `.env` (`DF_BROWSER_MAX_ITEMS_PER_RUN`, plus
+`DF_ADAPTER_*_ENABLED` per site).
 
 ## Extending it
 
 - **New item type** (house, phone, …): add a `BaseCategory` subclass in
   `deal_finder/categories/` and register it in `registry.py`. The web form, filters, and
   default questions are generated from the category's field definitions — no UI changes.
-- **New marketplace**: subclass `CarBrowserAdapter` (in `deal_finder/adapters/_browser_car.py`)
-  — set `base_url`, `id_regex`, and `build_search_urls` — then register it. Or subclass
-  `BaseAdapter` directly for a non-browser source. Matching, dedup, AI, email, scheduling,
-  and UI all work unchanged.
+- **New marketplace**: subclass `BaseAdapter`, implement `search()` (wrapping a
+  dedicated package or calling an API directly), and register it in `registry.py`.
+  Matching, dedup, AI, notifications, scheduling, and UI all work unchanged.
 
 See `deal_finder/adapters/ricardo.py` (a ~15-line adapter) and `deal_finder/adapters/demo.py`.
 
@@ -133,41 +124,41 @@ See `deal_finder/adapters/ricardo.py` (a ~15-line adapter) and `deal_finder/adap
 | Adapter | State | Notes |
 |---|---|---|
 | **tutti.ch** | ✅ verified end-to-end | Uses the [tutti-scraper](https://pypi.org/project/tutti-scraper/) package, which calls tutti's own **public GraphQL API** (`tutti.ch/api/v10/graphql`) directly — plain requests, no browser or bypass. Pins the search to tutti's `cars` category (skips toys/accessories) and reads structured make/year/mileage properties. |
-| **Ricardo.ch** | ✅ working (may rate-limit) | Verified extraction (search cards + detail). Free-text search returns some accessories too — add price/keyword filters to narrow. Frequent access can trigger a temporary 403 (logged, retried next run). |
+| **Ricardo.ch** | ✅ verified end-to-end | Uses the [ricardo-scraper](https://pypi.org/project/ricardo-scraper/) package, which drives its own bundled, anti-fingerprinting Camoufox browser to get past Cloudflare's Managed Challenge — self-contained, no shared setup or profile needed. Free-text search returns some accessories too — add price/keyword filters to narrow. |
 | **AutoScout24.ch** | ✅ verified end-to-end | Biggest Swiss car inventory. Uses the [autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/) package, which calls `api.autoscout24.ch` — the site's own **public, unauthenticated JSON API** — directly. No browser, no Cloudflare/Akamai to bypass, no anti-bot measures needed at all. |
-| **Facebook Marketplace** | ⚠️ on by default; needs login | Uses the [facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/) package, which drives its own dedicated Playwright browser directly against facebook.com (no public API exists). Log in once via `python -m deal_finder.browser.fb_login` (stores no password) — its session is saved inside that package's own installed directory, so a `pipenv sync`/reinstall wipes it and you'll need to log in again. **Automating Facebook violates its ToS and risks account lock/ban** — use a dedicated account. |
-| **Demo** | ✅ offline | Canned multilingual sample listings; exercises the whole pipeline with no browser. |
+| **Facebook Marketplace** | ⚠️ on by default; needs login | Uses the [facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/) package, which drives its own dedicated Playwright browser directly against facebook.com (no public API exists). Log in once via `pipenv run fb-login` (stores no password) — its session is saved inside that package's own installed directory, so a `pipenv sync`/reinstall wipes it and you'll need to log in again. **Automating Facebook violates its ToS and risks account lock/ban** — use a dedicated account. Note: currently conflicts with ricardo-scraper's exact `playwright==1.60.0` pin (facebook-marketplace-scraper needs `playwright~=1.61`) — not installed by default; see the Pipfile comment. |
+| **Demo** | ✅ offline | Canned multilingual sample listings; exercises the whole pipeline with no network calls. |
 
 Per-site URL patterns / selectors are marked `# VERIFY LIVE` in each adapter — the one
 place to adjust if a site changes its markup.
 
 ## Legal / ToS
 
-This is a personal monitoring tool. It scans infrequently, paces requests with human-like
-delays, and reuses a real browser profile. Marketplace internals are unofficial and may
-change or block access. **Facebook**: automating it breaks Facebook's Terms and can get
-your account locked or banned — it's on by default per configuration, but use a dedicated
-account and understand the risk. Storing your Facebook password in Settings is optional and
-less safe than the one-time manual login. Use responsibly; keep scan frequency modest.
+This is a personal monitoring tool. It scans infrequently and relies on each
+marketplace's own dedicated package to access it responsibly. Marketplace internals are
+unofficial and may change or block access. **Facebook**: automating it breaks Facebook's
+Terms and can get your account locked or banned — it's on by default per configuration,
+but use a dedicated account and understand the risk. Storing your Facebook password in
+Settings is optional and less safe than the one-time manual login. Use responsibly; keep
+scan frequency modest.
 
 ## Project layout
 
 ```
 deal_finder/
   main.py            FastAPI app + scheduler lifespan
-  config.py db.py models.py schemas.py service.py
+  config.py db.py models.py schemas.py service.py progress.py
   registry.py        category + adapter registries
   scheduler.py pipeline.py matching.py util.py
   categories/        base.py, car.py            (add house.py, phone.py …)
-  adapters/          base.py, demo.py, _browser_car.py, tutti.py, ricardo.py,
-                     autoscout24.py, facebook.py
-  browser/           session.py (headful Chrome), stealth.py, human.py, extract.py,
-                     detect.py, adapter.py (BrowserAdapter), fb_login.py
+  adapters/          base.py, demo.py, tutti.py, ricardo.py, autoscout24.py, facebook.py
+  browser/           extract.py (shared price/year/mileage parsing), fb_login.py
   ai/                client.py, translate.py, questions.py
-  notify/            email.py, templates/match_email.html
+  notify/            email.py, telegram.py, telegram_setup.py, browser_open.py,
+                     templates/match_email.html
   web/               api.py, routes.py, templates/
-tests/               matching, adapters, browser_extract, browser_adapter, ai,
-                     notify, pipeline, api  (+ fixtures)
+tests/               matching, adapters, browser_extract, ai, notify, pipeline, api
+                     (+ fixtures)
 deploy/              launchd plist, pmset wake script, deploy guide
 ```
 

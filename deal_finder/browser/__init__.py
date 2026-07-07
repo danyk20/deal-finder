@@ -1,26 +1,10 @@
-"""Shared browser-automation layer (Playwright sync API, headful persistent Chrome).
+"""Shared, marketplace-agnostic scraping helpers reused by multiple adapters.
 
-Marketplace-agnostic: nothing site-specific lives here. Playwright is an optional
-dependency ([browser] extra); everything imports lazily so the core app and offline
-tests run without it.
+Deal Finder no longer drives its own browser session: every marketplace adapter (tutti,
+Ricardo, AutoScout24, Facebook) now wraps a dedicated PyPI package that manages its own
+access internally. This package only holds pure, dependency-free utilities those
+adapters still share -- e.g. extract.py's parse_price/parse_year/parse_int_km regex
+fallbacks for unstructured listing text.
 """
 
 from __future__ import annotations
-
-from .adapter import BrowserAdapter, CardRef
-from .errors import BotWallError, BrowserUnavailable, LoginRequiredError
-from .page import PageView
-from .session import BrowserConfig, BrowserSession, SessionLike, is_available
-
-__all__ = [
-    "BrowserAdapter",
-    "CardRef",
-    "BrowserConfig",
-    "BrowserSession",
-    "SessionLike",
-    "PageView",
-    "is_available",
-    "BotWallError",
-    "BrowserUnavailable",
-    "LoginRequiredError",
-]
