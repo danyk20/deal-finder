@@ -194,6 +194,29 @@ def test_search_passes_credentials(monkeypatch):
     assert _FakeSession.instances[0].password == "hunter2"
 
 
+def test_search_prefers_passed_settings_over_get_settings(monkeypatch):
+    """The pipeline resolves effective settings (env + DB-stored Settings-page overrides,
+    see config.effective_settings/runtime_settings) once per run and passes them into
+    search() -- see adapters/base.py's search() docstring. A bare get_settings() call
+    only sees env/.env values, so it would never see credentials the user only saved via
+    the web UI. Guards against regressing back to that (the original bug: Facebook
+    credentials configured in Settings were silently ignored, always logging in
+    anonymously)."""
+    _install_fake(monkeypatch, search_result=[], visit_result=[])
+    # get_settings() deliberately has no credentials and a different item cap, so any use
+    # of it instead of the passed-in settings would be caught by the assertions below.
+    monkeypatch.setattr(
+        "deal_finder.adapters.facebook.get_settings",
+        lambda: Settings(browser_max_items_per_run=99),
+    )
+    passed_in = Settings(
+        facebook_email="ui@example.com", facebook_password="s3cret", browser_max_items_per_run=3
+    )
+    list(FacebookAdapter().search(_query(), passed_in))
+    assert _FakeSession.instances[0].email == "ui@example.com"
+    assert _FakeSession.instances[0].password == "s3cret"
+
+
 def test_login_required_raises_adapter_error(monkeypatch):
     import fb_scraper.scraper as fb_scraper_mod
 

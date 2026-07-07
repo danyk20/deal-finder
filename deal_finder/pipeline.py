@@ -103,7 +103,7 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
     for key, adapter in plan:
         progress.set_status(watch.id, f"Searching {getattr(adapter, 'label', key)}…")
         try:
-            found = list(adapter.search(query))
+            found = list(adapter.search(query, settings))
             listings.extend(found)
             result.adapter_status[key] = f"ok ({len(found)})"
         except AdapterError as exc:

@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
-from ..config import get_settings
+from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.facebook")
@@ -99,7 +99,7 @@ class FacebookAdapter(BaseAdapter):
     enabled_by_default = True  # user's explicit choice; ToS/ban risk — see module docstring
     status_note = "⚠ automated FB use risks account bans; needs a one-time login"
 
-    def search(self, query: MarketplaceQuery) -> Iterable[Listing]:
+    def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
         text = (query.text or " ".join(query.terms)).strip()
         if not text:
             raise AdapterError("Facebook Marketplace: no search text (make/model) set on the watch")
@@ -118,7 +118,12 @@ class FacebookAdapter(BaseAdapter):
                 "run: pipenv install --categories facebook (or pip install facebook-marketplace-scraper)"
             ) from exc
 
-        settings = get_settings()
+        # ``settings`` is the pipeline's already-resolved effective settings (env + the
+        # web UI's DB-stored overrides — see adapters/base.py's search() docstring).
+        # Falling back to get_settings() (env/.env only) keeps direct callers (tests,
+        # health_check() below) working without needing to pass one in, but it will
+        # never see credentials saved only via the Settings page.
+        settings = settings or get_settings()
         p = query.params or {}
 
         try:

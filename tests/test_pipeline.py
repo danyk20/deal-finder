@@ -72,7 +72,7 @@ def test_adapter_error_is_isolated(session, monkeypatch):
         label = "Boom"
         supported_categories = {"car"}
 
-        def search(self, query):
+        def search(self, query, settings=None):
             raise AdapterError("kaboom")
 
     monkeypatch.setitem(registry.ADAPTERS, "boom", BoomAdapter())
@@ -102,7 +102,7 @@ def test_adapter_bot_wall_keeps_partial_listings(session, monkeypatch):
         label = "Wally"
         supported_categories = {"car"}
 
-        def search(self, query):
+        def search(self, query, settings=None):
             raise AdapterError("wally: HTTP 403 (bot-wall / rate-limited)", partial_listings=partial)
 
     monkeypatch.setitem(registry.ADAPTERS, "wally", WalledAdapter())

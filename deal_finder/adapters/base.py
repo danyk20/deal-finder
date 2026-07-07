@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from ..config import Settings
+
 
 @dataclass
 class MarketplaceQuery:
@@ -90,7 +92,16 @@ class BaseAdapter:
     # in the web UI or the public /api/marketplaces listing.
     internal_only: bool = False
 
-    def search(self, query: MarketplaceQuery) -> Iterable[Listing]:  # pragma: no cover - interface
+    def search(
+        self, query: MarketplaceQuery, settings: Settings | None = None
+    ) -> Iterable[Listing]:  # pragma: no cover - interface
+        """``settings``, when given, is the caller's already-resolved effective settings
+        (env defaults + DB overrides — see config.effective_settings) for this run. Adapter
+        instances are shared singletons across concurrent watch runs (see registry.py), so
+        this must be taken as a plain argument rather than stored on ``self``. Adapters
+        that don't need any settings can ignore it; adapters that do should prefer it over
+        calling config.get_settings() themselves, which only sees env/.env values and
+        misses anything the user configured via the web UI's Settings page."""
         raise NotImplementedError
 
     def health_check(self) -> bool:

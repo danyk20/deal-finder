@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 
+from ..config import Settings
 from .base import BaseAdapter, Listing, MarketplaceQuery
 
 _DEMO_LISTINGS = [
@@ -110,7 +111,7 @@ class DemoAdapter(BaseAdapter):
     status_note = "offline sample data for testing"
     internal_only = True  # dev/test only — hidden from the web UI and public API
 
-    def search(self, query: MarketplaceQuery) -> Iterable[Listing]:
+    def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
         # Returns everything; the matching engine applies the watch's filters.
         return list(_DEMO_LISTINGS)
 

@@ -23,7 +23,7 @@ from typing import Any
 
 from autoscout24_scraper import make_session, resolve_make_key, resolve_model_key, search_listings, visit_all_listings
 
-from ..config import get_settings
+from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.autoscout24")
@@ -106,8 +106,8 @@ class AutoScout24Adapter(BaseAdapter):
     enabled_by_default = True
     status_note = "public JSON API (api.autoscout24.ch) via the autoscout24-scraper package — no browser needed"
 
-    def search(self, query: MarketplaceQuery) -> Iterable[Listing]:
-        settings = get_settings()
+    def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
+        settings = settings or get_settings()
         p = query.params or {}
         make, model = (p.get("make") or "").strip(), (p.get("model") or "").strip()
         if not make or not model:

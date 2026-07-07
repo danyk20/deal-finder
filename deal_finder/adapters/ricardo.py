@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from ricardo_scraper import scrape
 
 from ..browser import extract as ex  # shared parse_year / parse_int_km
-from ..config import get_settings
+from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.ricardo")
@@ -67,12 +67,12 @@ class RicardoAdapter(BaseAdapter):
     enabled_by_default = True
     status_note = "ricardo-scraper package (Camoufox browser, bypasses Cloudflare) — no shared browser session needed"
 
-    def search(self, query: MarketplaceQuery) -> Iterable[Listing]:
+    def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
         text = (query.text or " ".join(query.terms)).strip()
         if not text:
             raise AdapterError("Ricardo.ch: no search text (make/model) set on the watch")
 
-        settings = get_settings()
+        settings = settings or get_settings()
         try:
             result = scrape(
                 text,
