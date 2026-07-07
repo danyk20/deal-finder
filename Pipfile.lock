@@ -269,11 +269,11 @@
         },
         "facebook-marketplace-scraper": {
             "hashes": [
-                "sha256:321c698ebd98a08cabdd6b28efe2d07e5cd84776fb0eae7849903b6d73c0c109",
-                "sha256:e9f3d22aacebf78e45e05b505be141ad1d812da3be4b24808426f467a9912542"
+                "sha256:77b4c45b52dcc4c6dff50f331a6107c367836d761b3f386c360329b4f93a2e07",
+                "sha256:79e20ec65c6f577f468940f5cce94da7ba4a7f3b309a0535e6e036e48226c768"
             ],
             "markers": "python_version >= '3.13'",
-            "version": "==0.2.0"
+            "version": "==0.2.1"
         },
         "fastapi": {
             "hashes": [

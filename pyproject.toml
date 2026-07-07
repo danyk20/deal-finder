@@ -36,7 +36,7 @@ dependencies = [
 # Installed by default via the Pipfile ("facebook" extra).
 # >=0.2.0 pins playwright==1.60.0 (was ~=1.61), matching ricardo-scraper's exact pin --
 # 0.1.0 conflicted with ricardo-scraper and couldn't be installed alongside it.
-facebook = ["facebook-marketplace-scraper>=0.2.0"]
+facebook = ["facebook-marketplace-scraper>=0.2.1"]
 dev = [
     "pytest>=8",
     "respx>=0.21",
