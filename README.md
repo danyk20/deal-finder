@@ -1,7 +1,7 @@
 # Deal Finder
 
 Watch Swiss second-hand marketplaces for the car you want — get notified about new
-listings, translated to English and pre-analyzed by a **free local AI**.
+listings, translated and pre-analyzed by a **free local AI**.
 
 ![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-web%20UI%20%2B%20API-009688?logo=fastapi&logoColor=white)
@@ -10,8 +10,14 @@ listings, translated to English and pre-analyzed by a **free local AI**.
 
 - **Scans on your schedule** — tutti.ch, Ricardo.ch, AutoScout24.ch, Facebook Marketplace.
 - **Notifies once per listing** — email or Telegram, deduplicated across marketplaces.
-- **AI-enriched** — translates DE/FR/IT → EN and answers your questions (condition,
-  known issues, pickup, …) using [Ollama](https://ollama.com). No API keys, no cost.
+- **AI-enriched** — translates the description into your chosen language and answers
+  your questions (condition, known issues, pickup, …) using [Ollama](https://ollama.com).
+  No API keys, no cost.
+- **AI-checked non-negotiables** — a free-text "must-have" filter (e.g. "must be green,
+  no visible rust, engine currently runs") judged against the listing's full data AND
+  its photos, not just the description.
+- **Transparent filtering** — every run shows not just what matched, but every listing
+  that was found and *why* it got filtered out.
 - **Extensible** — new item types (houses, phones, …) and new marketplaces are one file each.
 
 ## Quick start
@@ -93,16 +99,32 @@ Everything is configurable in the **Settings** page or via `.env` — see
 [.env.example](.env.example) for the annotated full list. The groups that matter most:
 
 - `DF_SMTP_*` — email notifications (for Gmail, use an App Password)
-- `DF_OLLAMA_*` — AI base URL and model (default `gemma4:12b`)
+- `DF_OLLAMA_*` — AI base URL, model (default `gemma4:12b`), and request timeout
 - `DF_ADAPTER_*_ENABLED` — turn individual marketplaces on/off
+
+The Settings page also lets you pick the **translation target language** (a curated
+list of 35 languages, default English) and set a per-watch **non-negotiables** filter
+(see below).
 
 ## Local AI
 
 Ollama must be running for translation and Q&A — see step 3 in Quick start. AI never
 blocks the pipeline though: if Ollama is off or unreachable, notifications still go
-out, just untranslated and without answers. The default `gemma4:12b` handles DE/FR/IT→EN
-translation and listing Q&A well on an 8 GB Mac. Set the model via `DF_OLLAMA_MODEL` or
-in **Settings**.
+out, just untranslated and without answers. The default `gemma4:12b` handles
+DE/FR/IT→English translation and listing Q&A well on an 8 GB Mac; pick a different
+target language (or model) via `DF_OLLAMA_MODEL`/**Settings**.
+
+Q&A answers are drawn from every scraped field (price, year, mileage, fuel, location,
+condition, …), not just the free-text description — many answers only exist in
+structured data the marketplace exposes but never actually writes out in prose.
+
+**Non-negotiables**: each car watch has a free-text "Non-negotiables" filter (Settings
+form, default `Item is currently working.`) that the AI checks per candidate listing
+against its full data *and* photos — e.g. "must be green" is judged from the pictures
+even if the description never mentions colour. It runs last in the filter chain (after
+the free price/keyword/location checks), so it only costs an AI call on listings that
+already look like a real match, and it fails open (never hides a listing) if the AI
+check itself errors.
 
 <details>
 <summary><strong>Choosing a model for your system RAM</strong> (recommendations as of July 2026)</summary>
@@ -133,8 +155,8 @@ over the default `gemma4:12b`.
 ```
 Web UI / API ──> Watch (DB) ──> APScheduler (per-watch interval/cron) ──> run_watch()
 
-run_watch:  adapters.search() ─> filter (price/year/km/keywords/location) ─> dedup
-            ─> AI translate + answer questions ─> notify (email/Telegram) ─> record seen
+run_watch:  adapters.search() ─> filter (price/year/km/keywords/location/AI non-negotiables)
+            ─> dedup ─> AI translate + answer questions ─> notify (email/Telegram) ─> record seen
 ```
 
 - **Seed mode** — a watch's first run marks existing listings as seen without notifying,
@@ -143,6 +165,12 @@ run_watch:  adapters.search() ─> filter (price/year/km/keywords/location) ─>
   title+price heuristic so the same car isn't sent twice.
 - **Resilience** — adapter failures are isolated per site; failed notifications leave the
   listing unseen so it retries next run.
+- **Live progress** — the "Run now" overlay reports exactly what's happening: which
+  listing is being filtered/checked against non-negotiables, and which listing/question
+  is currently being answered by the AI.
+- **Filtered-out visibility** — a "Run now" test shows every found listing that *didn't*
+  match, with the specific reason it was rejected (price, missing keyword, non-negotiable
+  not met, …), right below the recent-matches table.
 
 ## Extending
 
@@ -161,9 +189,11 @@ deal_finder/
   main.py             FastAPI app + scheduler lifespan
   registry.py         category + adapter registries
   pipeline.py         the scan → filter → dedup → AI → notify flow
+  matching.py         generic filter engine (price/keywords/location/non-negotiables)
+  languages.py        curated translation-target language list (Settings dropdown)
   categories/         item-type definitions (car.py, …)
   adapters/           one file per marketplace
-  ai/                 Ollama client, translation, question answering
+  ai/                 Ollama client, translation, Q&A, non-negotiables vision check
   notify/             email, Telegram, browser-open (dry run)
   web/                routes, JSON API, templates
 tests/                offline test suite (pytest)
