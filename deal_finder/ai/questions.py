@@ -1,72 +1,56 @@
-"""Answer predefined questions about a listing using ONLY its text (no hallucination).
+"""Answer predefined questions about a listing using ONLY its known data (no hallucination).
 
-The model is asked to answer strictly from the provided description and to say
-"not stated" when the listing doesn't contain the information. Output is parsed
-robustly (the model may wrap JSON in prose or code fences).
+Asks one question per model call (rather than batching all questions into a single JSON
+response) so callers can report fine-grained "answering question X/Y" progress, and so a
+single question's slower/larger answer doesn't inflate every other question's latency.
 """
 
 from __future__ import annotations
 
-import json
-import re
+from collections.abc import Callable
 
 from .client import OllamaClient
 
 _SYSTEM = (
-    "You answer questions about a second-hand marketplace listing. Use ONLY the "
-    "information in the provided listing text. If the listing does not contain the "
-    "answer, respond exactly with 'not stated'. Do NOT guess or invent details. "
-    "Keep each answer to one or two short sentences. Respond with a single JSON object "
-    'whose keys are the question numbers as strings (e.g. "1", "2") and whose values '
-    "are your answers."
+    "You answer a single question about a second-hand marketplace listing. Use ONLY the "
+    "information in the provided listing data (structured fields like price/year/mileage/ "
+    "fuel/location as well as the free-text description) -- the answer may live in a "
+    "field rather than the description. If the listing does not contain the answer, "
+    "respond exactly with 'not stated'. Do NOT guess or invent details. Keep your answer "
+    "to one or two short sentences. Output ONLY the answer -- no preamble, no restating "
+    "the question."
 )
 
 
-def _extract_json_object(text: str) -> dict:
-    """Pull the first JSON object out of model output, tolerating fences/prose."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text).strip()
-    try:
-        return json.loads(text)
-    except ValueError:
-        pass
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            return json.loads(text[start : end + 1])
-        except ValueError:
-            pass
-    raise ValueError("no JSON object found in model output")
-
-
 def answer_questions(
-    client: OllamaClient, description: str, questions: list[str]
+    client: OllamaClient,
+    listing_text: str,
+    questions: list[str],
+    *,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, str]:
-    """Return {question: answer}. Best-effort; missing answers default to 'not stated'."""
+    """Return {question: answer}. Best-effort; missing answers default to 'not stated'.
+
+    ``listing_text`` should be every known field of the listing (see
+    ``Listing.as_key_value_text``), not just the free-text description -- an answer may
+    only live in a structured field (e.g. mileage, fuel type).
+
+    ``on_progress(index, total, question)``, if given, is called just before each
+    question is sent to the model (1-indexed).
+    """
     questions = [q for q in (questions or []) if q.strip()]
-    if not questions or not (description or "").strip():
+    if not questions or not (listing_text or "").strip():
         return {q: "not stated" for q in questions}
 
-    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
-    user = (
-        f"LISTING TEXT:\n{description}\n\n"
-        f"QUESTIONS:\n{numbered}\n\n"
-        'Answer as JSON, e.g. {"1": "...", "2": "not stated"}.'
-    )
-    raw = client.chat(
-        [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
-        temperature=0.0,
-        json_mode=True,
-    )
-    try:
-        parsed = _extract_json_object(raw)
-    except ValueError:
-        return {q: "(AI answer could not be parsed)" for q in questions}
-
+    total = len(questions)
     answers: dict[str, str] = {}
-    for i, q in enumerate(questions, start=1):
-        val = parsed.get(str(i), parsed.get(q, "not stated"))
-        answers[q] = str(val).strip() if val is not None else "not stated"
+    for i, question in enumerate(questions, start=1):
+        if on_progress:
+            on_progress(i, total, question)
+        user = f"LISTING DATA:\n{listing_text}\n\nQUESTION: {question}"
+        raw = client.chat(
+            [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
+            temperature=0.0,
+        )
+        answers[question] = raw.strip() or "not stated"
     return answers

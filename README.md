@@ -31,13 +31,23 @@ pipenv install --dev
 cp .env.example .env              # optional — everything can be set later in the UI
 ```
 
-**3. (Optional) Enable local AI:**
+**3. (Optional, but needed for translation and Q&A) Enable local AI:**
 
 ```bash
 brew install ollama
-brew services start ollama
-ollama pull gemma3:4b
+ollama pull gemma4:12b
 ```
+
+`pipenv run dev` / `pipenv run start` only run the web app — they do **not** start Ollama.
+Before using AI features, start Ollama yourself in a separate terminal:
+
+```bash
+ollama serve
+```
+
+This runs only for that terminal session — it won't launch at login or boot, and stops
+once you close it or kill the process. Leave it running alongside `pipenv run dev`
+while you use the app.
 
 **4. Run it:**
 
@@ -83,13 +93,14 @@ Everything is configurable in the **Settings** page or via `.env` — see
 [.env.example](.env.example) for the annotated full list. The groups that matter most:
 
 - `DF_SMTP_*` — email notifications (for Gmail, use an App Password)
-- `DF_OLLAMA_*` — AI base URL and model (default `gemma3:4b`)
+- `DF_OLLAMA_*` — AI base URL and model (default `gemma4:12b`)
 - `DF_ADAPTER_*_ENABLED` — turn individual marketplaces on/off
 
 ## Local AI
 
-AI is optional and never blocks: if Ollama is off or unreachable, notifications still go
-out — just untranslated and without answers. The default `gemma3:4b` handles DE/FR/IT→EN
+Ollama must be running for translation and Q&A — see step 3 in Quick start. AI never
+blocks the pipeline though: if Ollama is off or unreachable, notifications still go
+out, just untranslated and without answers. The default `gemma4:12b` handles DE/FR/IT→EN
 translation and listing Q&A well on an 8 GB Mac. Set the model via `DF_OLLAMA_MODEL` or
 in **Settings**.
 
@@ -98,7 +109,7 @@ in **Settings**.
 
 Pick the largest model that fits your RAM at Q4 quantization, leaving headroom for the
 OS and the app. From the 16 GB tier up, multilingual comprehension improves noticeably
-over the default `gemma3:4b`.
+over the default `gemma4:12b`.
 
 | System RAM | Best model (Q4) | Model size | License | Why this pick |
 |---|---|---|---|---|

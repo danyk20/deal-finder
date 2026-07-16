@@ -28,6 +28,7 @@ class FieldDef:
     placeholder: str = ""
     help: str = ""
     options: list[str] = field(default_factory=list)
+    default: str = ""  # prefilled value for a brand-new watch
 
 
 class BaseCategory:
@@ -42,4 +43,9 @@ class BaseCategory:
 
     def post_match(self, listing: "Listing", watch: "Watch") -> bool:
         """Category-specific filtering on top of the generic matching engine."""
-        return True
+        return self.post_match_reason(listing, watch) is None
+
+    def post_match_reason(self, listing: "Listing", watch: "Watch") -> str | None:
+        """Like :meth:`post_match`, but return None on pass or a human-readable reason
+        for the rejection instead of a bare bool."""
+        return None

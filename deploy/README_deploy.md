@@ -11,7 +11,7 @@ Free and fully local. Good when the Mac is on charger most of the time.
 1. **Run Ollama as a service** so the model is always available:
    ```bash
    brew services start ollama
-   ollama pull gemma3:4b        # verify the tag with `ollama list`
+   ollama pull gemma4:12b        # verify the tag with `ollama list`
    ```
 2. **Install the app as a LaunchAgent** (auto-start at login, auto-restart on crash):
    ```bash

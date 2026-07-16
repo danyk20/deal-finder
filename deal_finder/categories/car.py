@@ -35,6 +35,22 @@ class CarCategory(BaseCategory):
             "Must NOT contain (comma-separated)",
             help="Listing is skipped if any of these words appear.",
         ),
+        FieldDef(
+            "non_negotiables",
+            "Non-negotiables (checked by AI, incl. photos)",
+            kind="textarea",
+            default="Item is currently working.",
+            placeholder="e.g. must be green, no visible rust or accident damage, engine currently starts and runs",
+            help=(
+                "Free-text must-haves. The AI checks each listing's full data, description, "
+                "AND photos against this text, and filters out anything that clearly fails "
+                "it -- things the description never mentions (like colour) are still judged "
+                "from photos when available. A listing is only rejected when it clearly "
+                "contradicts a requirement; ambiguous/unmentioned details are not held "
+                "against it. Leave blank to disable. Costs one extra AI call per candidate "
+                "listing that already passed every other filter."
+            ),
+        ),
     ]
 
     default_questions = [
@@ -67,17 +83,17 @@ class CarCategory(BaseCategory):
             },
         )
 
-    def post_match(self, listing: Listing, watch: Watch) -> bool:
+    def post_match_reason(self, listing: Listing, watch: Watch) -> str | None:
         f = watch.filters or {}
         year = listing.attributes.get("year")
         if year is not None:
             ymin, ymax = to_int(f.get("year_min")), to_int(f.get("year_max"))
             if ymin is not None and year < ymin:
-                return False
+                return f"year {year} is below the minimum {ymin}"
             if ymax is not None and year > ymax:
-                return False
+                return f"year {year} is above the maximum {ymax}"
         mileage = listing.attributes.get("mileage_km")
         mmax = to_int(f.get("mileage_max"))
         if mmax is not None and mileage is not None and mileage > mmax:
-            return False
-        return True
+            return f"mileage {mileage} km is above the maximum {mmax} km"
+        return None

@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     # --- Local AI (Ollama, OpenAI-compatible API) ---
     ai_enabled: bool = True
     ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_model: str = "gemma3:4b"
+    ollama_model: str = "gemma4:12b"
     ollama_timeout: float = 120.0
+    ai_translate_to: str = "English"  # target language for the description translation step
 
     # --- Telegram (optional alternative to email; per-watch choice) ---
     telegram_bot_token: str = ""          # from @BotFather
@@ -82,6 +83,8 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "ai_enabled",
     "ollama_base_url",
     "ollama_model",
+    "ollama_timeout",
+    "ai_translate_to",
     "telegram_bot_token",
     "telegram_default_chat_id",
     "default_notify_email",

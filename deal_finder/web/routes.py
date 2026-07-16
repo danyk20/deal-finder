@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..config import EDITABLE_KEYS
 from ..db import get_session, load_setting_overrides, runtime_settings
+from ..languages import SUPPORTED_LANGUAGES
 from ..models import AppSetting, NotificationLog, SeenListing, Watch
 from ..progress import get_status
 from ..registry import get_category, list_adapters, list_categories
@@ -213,6 +214,7 @@ def settings_page(request: Request, session: Session = Depends(get_session)):
             "values": values,
             "overrides": overrides,
             "editable_keys": EDITABLE_KEYS,
+            "supported_languages": SUPPORTED_LANGUAGES,
         },
     )
 

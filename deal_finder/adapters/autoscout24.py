@@ -16,7 +16,9 @@ broad watch doesn't trigger hundreds of detail requests every run):
 
 from __future__ import annotations
 
+import calendar
 import logging
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
@@ -54,6 +56,111 @@ def _posted_at(raw: Any) -> datetime | None:
         return None
 
 
+_DRIVE_TYPE_LABELS = {
+    "all": "all-wheel drive (dual motor)",
+    "front": "front-wheel drive",
+    "rear": "rear-wheel drive",
+}
+
+# Tesla's own naming convention: a trim ending in "D" ("90D", "P100D", "90 D", ...) is
+# always dual-motor AWD; used as a fallback when the API's own `driveType` field is
+# null/missing, so a version name that plainly says "D" doesn't get lost.
+_DUAL_MOTOR_VERSION_RE = re.compile(r"\b\d{2,3}\s*D\b", re.IGNORECASE)
+
+
+def _yes_no(v: Any) -> str | None:
+    return None if v is None else ("yes" if v else "no")
+
+
+def _registration_month_name(date_str: Any) -> str | None:
+    if not isinstance(date_str, str):
+        return None
+    try:
+        d = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return calendar.month_name[d.month]
+
+
+def _build_attributes(item: dict, version: str = "") -> dict[str, Any]:
+    """Flatten every AI-Q&A-relevant structured field from the API's raw item into
+    ``Listing.attributes``. The API exposes far more than year/mileage (accident
+    history, drive type, supercharging, warranty, ...) and free-text questions often ask
+    about exactly these facts -- if a field isn't mapped here, the AI can never answer
+    from it, even when the raw payload states it explicitly (e.g. ``teaser``, which used
+    to be dropped outright whenever a real ``description`` was also present)."""
+    attrs: dict[str, Any] = {}
+
+    year = item.get("firstRegistrationYear")
+    if isinstance(year, int):
+        attrs["year"] = year
+    reg_month = _registration_month_name(item.get("firstRegistrationDate"))
+    if reg_month:
+        attrs["registration_month"] = reg_month
+    mileage = item.get("mileage")
+    if isinstance(mileage, (int, float)):
+        attrs["mileage_km"] = int(mileage)
+    if item.get("fuelType"):
+        attrs["fuel"] = item["fuelType"]
+    if item.get("driveType"):
+        attrs["drive_type"] = _DRIVE_TYPE_LABELS.get(item["driveType"], item["driveType"])
+    elif _DUAL_MOTOR_VERSION_RE.search(version or ""):
+        attrs["drive_type"] = "all-wheel drive (dual motor) -- inferred from 'D' in the model designation"
+    if item.get("transmissionType"):
+        attrs["transmission"] = item["transmissionType"]
+    if item.get("conditionType"):
+        attrs["condition"] = item["conditionType"]
+    had_accident = _yes_no(item.get("hadAccident"))
+    if had_accident is not None:
+        attrs["had_accident"] = had_accident
+    if item.get("doors"):
+        attrs["doors"] = item["doors"]
+    if item.get("seats"):
+        attrs["seats"] = item["seats"]
+    if item.get("bodyColor"):
+        attrs["body_color"] = item["bodyColor"]
+    if item.get("interiorColor"):
+        attrs["interior_color"] = item["interiorColor"]
+    if item.get("horsePower"):
+        attrs["horsepower"] = item["horsePower"]
+    if item.get("kiloWatts"):
+        attrs["power_kw"] = item["kiloWatts"]
+    if item.get("batteryCapacity"):
+        attrs["battery_capacity_kwh"] = item["batteryCapacity"]
+    if item.get("range"):
+        attrs["range_km"] = item["range"]
+    if item.get("chargingPlugType"):
+        attrs["charging_plug_type"] = item["chargingPlugType"]
+    if item.get("fastChargingPlugType"):
+        attrs["fast_charging_plug_type"] = item["fastChargingPlugType"]
+    warranty = item.get("warranty") if isinstance(item.get("warranty"), dict) else {}
+    if warranty.get("type") and warranty["type"] != "none":
+        attrs["warranty"] = warranty["type"]
+    inspected = _yes_no(item.get("inspected"))
+    if inspected is not None:
+        attrs["inspected_mfk"] = inspected
+    has_new_tires = _yes_no(item.get("hasNewTires"))
+    if has_new_tires is not None:
+        attrs["has_new_tires"] = has_new_tires
+    has_extra_tires = _yes_no(item.get("hasAdditionalSetOfTires"))
+    if has_extra_tires is not None:
+        attrs["has_additional_tire_set"] = has_extra_tires
+    co2 = item.get("co2Emission")
+    if co2 is not None:
+        attrs["co2_emission_g_km"] = co2
+    consumption = item.get("consumption") if isinstance(item.get("consumption"), dict) else {}
+    if consumption.get("combined") is not None:
+        attrs["consumption_combined_l_100km"] = consumption["combined"]
+    # AutoScout24's short marketing blurb -- kept separate from `description` (rather
+    # than only used as a fallback when there's no description) so facts stated ONLY in
+    # the teaser (e.g. "Kein free supercharging") always reach the AI's context.
+    teaser = (item.get("teaser") or "").strip()
+    if teaser:
+        attrs["teaser"] = teaser
+
+    return attrs
+
+
 def listing_from_api_item(item: dict) -> Listing | None:
     """Map one autoscout24-scraper item (search-summary or merged-detail shape) to a
     Listing. Pure + fixture-testable without any network access."""
@@ -74,13 +181,7 @@ def listing_from_api_item(item: dict) -> Listing | None:
     seller = item.get("seller") if isinstance(item.get("seller"), dict) else {}
     location = " ".join(str(x) for x in (seller.get("zipCode"), seller.get("city")) if x) or None
 
-    attrs: dict[str, int] = {}
-    year = item.get("firstRegistrationYear")
-    if isinstance(year, int):
-        attrs["year"] = year
-    mileage = item.get("mileage")
-    if isinstance(mileage, (int, float)):
-        attrs["mileage_km"] = int(mileage)
+    attrs = _build_attributes(item, version=version)
 
     price = item.get("price")
     return Listing(

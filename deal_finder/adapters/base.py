@@ -61,6 +61,23 @@ class Listing:
     def searchable_text(self) -> str:
         return f"{self.title}\n{self.description}".lower()
 
+    @property
+    def as_key_value_text(self) -> str:
+        """Every known field flattened into ``key: value`` lines, so AI question-
+        answering can pull facts (year, mileage, fuel, price, location, ...) that live
+        in structured fields rather than the free-text description."""
+        lines = [
+            f"title: {self.title}",
+            f"price: {self.price} {self.currency}" if self.price is not None else "price: not stated",
+            f"location: {self.location or 'not stated'}",
+            f"posted_at: {self.posted_at.isoformat() if self.posted_at else 'not stated'}",
+        ]
+        for key, value in (self.attributes or {}).items():
+            if value not in (None, ""):
+                lines.append(f"{key}: {value}")
+        lines.append(f"description: {self.description or 'not stated'}")
+        return "\n".join(lines)
+
 
 class AdapterError(Exception):
     """Recoverable adapter failure (network error, bot challenge, parse problem).

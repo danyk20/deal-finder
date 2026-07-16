@@ -24,9 +24,13 @@
   <h4>Filters</h4>
   <div class="grid-2">
     {% for f in category.filter_fields %}
-    <label>{{ f.label }}
+    <label{% if f.kind == 'textarea' %} style="grid-column: 1 / -1;"{% endif %}>{{ f.label }}
+      {% if f.kind == 'textarea' %}
+      <textarea name="f_{{ f.name }}" rows="3" placeholder="{{ f.placeholder }}">{{ (watch.filters.get(f.name, f.default) if watch else f.default) }}</textarea>
+      {% else %}
       <input type="{{ 'number' if f.kind == 'number' else 'text' }}" name="f_{{ f.name }}"
-             value="{{ (watch.filters.get(f.name, '') if watch else '') }}" placeholder="{{ f.placeholder }}">
+             value="{{ (watch.filters.get(f.name, f.default) if watch else f.default) }}" placeholder="{{ f.placeholder }}">
+      {% endif %}
       {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}
     </label>
     {% endfor %}

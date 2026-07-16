@@ -54,9 +54,20 @@
     <label>Ollama base URL{{ hint('Address of your local Ollama server\'s OpenAI-compatible API. Default is http://localhost:11434/v1 -- only change this if Ollama runs elsewhere.') }}
       <input type="text" name="ollama_base_url" value="{{ values.ollama_base_url }}"></label>
     <label>Model{{ hint('Which Ollama model to use for translation/Q&A. Must already be pulled locally (ollama pull <model>) before it will work.') }}
-      <input type="text" name="ollama_model" value="{{ values.ollama_model }}" placeholder="gemma3:4b"></label>
+      <input type="text" name="ollama_model" value="{{ values.ollama_model }}" placeholder="gemma4:12b"></label>
   </div>
-  <small class="muted">Run <code>ollama serve</code> and <code>ollama pull {{ values.ollama_model or 'gemma3:4b' }}</code>. Verify the tag with <code>ollama list</code>.</small>
+  <div class="grid-2">
+    <label>Ollama timeout (seconds){{ hint('How long to wait for a translation/Q&A response before giving up and sending the email untranslated. Larger/slower local models (or a machine without a GPU) may need more than the 120s default.') }}
+      <input type="number" name="ollama_timeout" value="{{ values.ollama_timeout }}" placeholder="120"></label>
+    <label>Translate descriptions to{{ hint('Language the AI translates each listing\'s description into before it\'s emailed/sent. A listing already in this language is passed through untranslated. Limited to the languages Gemma supports well.') }}
+      <select name="ai_translate_to">
+        {% for name, flag in supported_languages %}
+        <option value="{{ name }}" {{ 'selected' if values.ai_translate_to == name else '' }}>{{ flag }} {{ name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <small class="muted">Run <code>ollama serve</code> and <code>ollama pull {{ values.ollama_model or 'gemma4:12b' }}</code>. Verify the tag with <code>ollama list</code>.</small>
 
   <h4>Behaviour</h4>
   <div class="grid-2">

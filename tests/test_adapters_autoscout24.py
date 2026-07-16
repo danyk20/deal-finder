@@ -46,6 +46,58 @@ def test_listing_from_api_item_real_fixture():
     assert li.image_urls and li.image_urls[0].startswith("https://listing-images.autoscout24.ch/")
 
 
+def test_listing_from_api_item_infers_dual_motor_from_version_name():
+    """Regression: some AutoScout24 listings have `driveType: null` even though the
+    Tesla trim name itself ("90 D", "P100D", ...) unambiguously means dual-motor AWD --
+    must not fall back to "not stated" when the naming already answers the question."""
+    item = {
+        "id": 1, "make": {"name": "TESLA"}, "model": {"name": "MODEL S"},
+        "versionFullName": "Model S 90 D",
+        "driveType": None,
+    }
+    li = listing_from_api_item(item)
+    assert "dual motor" in li.attributes["drive_type"]
+
+
+def test_listing_from_api_item_propagates_seats_power_and_registration():
+    item = {
+        "id": 1, "make": {"name": "TESLA"}, "model": {"name": "MODEL S"},
+        "versionFullName": "Model S 90 D",
+        "seats": 5,
+        "horsePower": 525,
+        "kiloWatts": 386,
+        "firstRegistrationYear": 2016,
+        "firstRegistrationDate": "2016-10-01",
+    }
+    li = listing_from_api_item(item)
+    assert li.attributes["seats"] == 5
+    assert li.attributes["horsepower"] == 525
+    assert li.attributes["power_kw"] == 386
+    assert li.attributes["year"] == 2016
+    assert li.attributes["registration_month"] == "October"
+
+
+def test_listing_from_api_item_teaser_kept_alongside_description():
+    """Regression: the teaser used to be silently dropped whenever a real `description`
+    was also present, so facts stated ONLY in the teaser (e.g. "no free supercharging")
+    never reached the AI's Q&A context -- it must now always end up in `attributes`."""
+    item = {
+        "id": 20281401,
+        "make": {"name": "TESLA"}, "model": {"name": "MODEL S"},
+        "versionFullName": "Model S 90 D",
+        "description": "Fahrzeug ist in einem sehr gepflegten Zustand.",
+        "teaser": "Kein free supercharging",
+        "hadAccident": False,
+        "driveType": "all",
+    }
+    li = listing_from_api_item(item)
+    assert li.description == "Fahrzeug ist in einem sehr gepflegten Zustand."
+    assert li.attributes["teaser"] == "Kein free supercharging"
+    assert li.attributes["had_accident"] == "no"
+    assert li.attributes["drive_type"] == "all-wheel drive (dual motor)"
+    assert "Kein free supercharging" in li.as_key_value_text
+
+
 def test_listing_from_api_item_handles_missing_fields():
     assert listing_from_api_item({}) is None  # no id -> skip
     assert listing_from_api_item({"id": 1}) is None  # no make/model/version -> no title

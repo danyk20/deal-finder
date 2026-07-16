@@ -34,7 +34,7 @@ from .adapters.base import AdapterError, Listing
 from .ai import Enrichment, OllamaClient, enrich_listing
 from .config import Settings
 from .db import runtime_settings
-from .matching import dedup_cross_marketplace, passes_filters
+from .matching import dedup_cross_marketplace, filter_rejection_reason
 from .models import NotificationLog, SeenListing, Watch, utcnow
 from .notify import EmailMatch, TelegramMatch, open_listings, render_email
 from .notify import send_email as send_match_email
@@ -73,6 +73,7 @@ class RunResult:
     opened: int = 0
     adapter_status: dict[str, str] = field(default_factory=dict)
     matches_preview: list[dict] = field(default_factory=list)
+    rejected_preview: list[dict] = field(default_factory=list)
     error: str | None = None
 
 
@@ -105,6 +106,17 @@ def _search_isolated(adapter, query, settings: Settings) -> list[Listing]:
     """
     with ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(lambda: list(adapter.search(query, settings))).result()
+
+
+def _listing_progress(watch_id: int | None, idx: int, total: int, title: str, *, suffix: str = ""):
+    """Build an ``enrich_listing`` progress callback that reports "listing X/Y (title):
+    <AI step>" as the watch's live status, so the "Running watch…" overlay shows exactly
+    which listing and which question is in flight."""
+
+    def _cb(message: str) -> None:
+        progress.set_status(watch_id, f"Listing {idx}/{total} ({title}){suffix}: {message}")
+
+    return _cb
 
 
 def _collect_listings(watch: Watch, query, category, result: RunResult, settings: Settings) -> list[Listing]:
@@ -193,10 +205,25 @@ def _run_watch(
     result.found = len(listings)
 
     progress.set_status(watch.id, f"Found {result.found} listing(s); filtering & deduping…")
-    matched = [li for li in listings if passes_filters(li, query, category, watch)]
+    matched: list[Listing] = []
+    rejected: list[tuple[Listing, str]] = []
+    has_non_negotiables = bool((watch.filters or {}).get("non_negotiables", "").strip())
+    for idx, li in enumerate(listings, start=1):
+        if has_non_negotiables:
+            progress.set_status(
+                watch.id, f"Checking listing {idx}/{len(listings)} ({li.title}) against non-negotiables…"
+            )
+        reason = filter_rejection_reason(li, query, category, watch, settings=settings, ai_client=ai_client)
+        if reason is None:
+            matched.append(li)
+        else:
+            rejected.append((li, reason))
     matched = dedup_cross_marketplace(matched)
     result.matched = len(matched)
     result.matches_preview = [listing_to_dict(li) for li in matched[:50]]
+    result.rejected_preview = [
+        {**listing_to_dict(li), "reason": reason} for li, reason in rejected[:50]
+    ]
 
     # Which are new (not previously seen for this watch)?
     if ignore_seen:
@@ -258,15 +285,19 @@ def _run_watch(
 def _send_via_email(session, watch, new, settings, ai_client, result, record) -> None:
     """One HTML email covering the whole batch -- all-or-nothing per run, same as before
     Telegram support existed."""
-    progress.set_status(watch.id, f"Enriching {len(new)} listing(s) with AI…")
-    email_matches = [
-        EmailMatch(
-            listing=li,
-            enrichment=_safe_enrich(settings, li, watch.questions, ai_client),
-            questions=watch.questions or [],
+    total = len(new)
+    email_matches = []
+    for idx, li in enumerate(new, start=1):
+        email_matches.append(
+            EmailMatch(
+                listing=li,
+                enrichment=_safe_enrich(
+                    settings, li, watch.questions, ai_client,
+                    on_progress=_listing_progress(watch.id, idx, total, li.title),
+                ),
+                questions=watch.questions or [],
+            )
         )
-        for li in new
-    ]
     subject, html = render_email(watch, email_matches)
     progress.set_status(watch.id, "Sending email…")
     try:
@@ -297,11 +328,14 @@ def _send_via_telegram(session, watch, new, settings, ai_client, result, record)
     remaining one unseen, to be retried on the next scheduled run."""
     sent = 0
     error: str | None = None
+    total = len(new)
     for idx, li in enumerate(new, start=1):
-        progress.set_status(watch.id, f"Enriching & sending listing {idx}/{len(new)} via Telegram…")
         match = TelegramMatch(
             listing=li,
-            enrichment=_safe_enrich(settings, li, watch.questions, ai_client),
+            enrichment=_safe_enrich(
+                settings, li, watch.questions, ai_client,
+                on_progress=_listing_progress(watch.id, idx, total, li.title, suffix=" (Telegram)"),
+            ),
             questions=watch.questions or [],
         )
         try:
@@ -327,9 +361,11 @@ def _send_via_telegram(session, watch, new, settings, ai_client, result, record)
     _finish(session, watch, status, record)
 
 
-def _safe_enrich(settings, listing, questions, ai_client) -> Enrichment:
+def _safe_enrich(settings, listing, questions, ai_client, *, on_progress=None) -> Enrichment:
     try:
-        return enrich_listing(settings, listing, questions or [], client=ai_client)
+        return enrich_listing(
+            settings, listing, questions or [], client=ai_client, on_progress=on_progress
+        )
     except Exception as exc:  # noqa: BLE001 - enrichment must never block email
         log.warning("enrichment failed for %s: %s", listing.external_id, exc)
         return Enrichment(

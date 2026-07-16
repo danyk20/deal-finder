@@ -10,6 +10,7 @@ name = "pypi"
 
 [packages]
 deal-finder = {extras = ["facebook"], path = ".", editable = true}
+autoscout24-scraper = "*"
 
 [dev-packages]
 pytest = ">=8"

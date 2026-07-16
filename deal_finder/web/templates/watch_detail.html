@@ -49,23 +49,42 @@
     var text = document.getElementById('run-progress-text');
     var watchId = {{ w.id }};
 
-    form.addEventListener('submit', function () {
-      // Don't preventDefault: the browser proceeds with its normal POST + full-page
-      // navigation, exactly as before. This overlay just polls for a status message
-      // while that request is in flight; the moment the response arrives, the browser
-      // replaces the whole page (overlay included), so there's nothing to clean up.
+    form.addEventListener('submit', function (evt) {
+      // A real full-page form submission leaves this page's JS timers at the mercy of
+      // the browser's navigation-pending behaviour -- some browsers throttle/pause a
+      // document's timers once a navigation is in flight, which can silently freeze the
+      // poll loop below (the overlay then gets stuck on its hardcoded "Starting…" text
+      // even though the run is progressing fine server-side). Doing the submission via
+      // fetch() instead keeps everything -- the POST and the poll -- as ordinary JS on
+      // a document that never actually navigates until we explicitly swap it in below.
+      evt.preventDefault();
       overlay.style.display = 'flex';
       text.textContent = 'Starting…';
+
+      var polling = true;
       (async function poll() {
-        while (true) {
+        while (polling) {
           try {
             var res = await fetch('/watches/' + watchId + '/run-status');
             var data = await res.json();
             if (data.status) text.textContent = data.status;
-          } catch (err) { /* transient poll error -- page navigates away when the run ends */ }
+          } catch (err) { /* transient poll error -- ignore and retry */ }
           await new Promise(function (resolve) { setTimeout(resolve, 500); });
         }
       })();
+
+      fetch(form.action, { method: 'POST', body: new FormData(form) })
+        .then(function (res) { return res.text(); })
+        .then(function (html) {
+          polling = false;
+          document.open();
+          document.write(html);
+          document.close();
+        })
+        .catch(function () {
+          polling = false;
+          window.location.reload();
+        });
     });
   })();
 </script>
@@ -125,6 +144,26 @@
   </tbody>
 </table>
 {% else %}<p class="muted">No matches recorded yet.</p>{% endif %}
+
+{% if run_result and run_result.rejected_preview %}
+<h3 style="margin-top:1.5rem;">Found but filtered out ({{ run_result.rejected_preview|length }})</h3>
+<table class="sortable">
+  <thead><tr>
+    <th>Title</th>
+    <th>Source</th>
+    <th>Why it didn't pass</th>
+  </tr></thead>
+  <tbody>
+  {% for m in run_result.rejected_preview %}
+    <tr>
+      <td><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title }}</a></td>
+      <td>{{ m.marketplace }}</td>
+      <td>{{ m.reason }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 <h3 style="margin-top:1.5rem;">Email log</h3>
 {% if logs %}

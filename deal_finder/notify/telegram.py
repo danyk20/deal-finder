@@ -173,27 +173,49 @@ def send_telegram(settings: Settings, chat_id: str, text: str, photo_url: str | 
 def send_telegram_match(settings: Settings, chat_id: str, match: TelegramMatch) -> None:
     """Render one listing's notification and send it -- the pipeline's entry point.
 
-    Tries sendPhoto with the header-first, budget-aware caption (render_caption()) first
-    when the listing has an image. If that call fails for ANY reason (most commonly:
-    Telegram couldn't fetch the marketplace's image URL), falls back to sendMessage with
-    the FULL text (render_telegram_message()'s output, not just the truncated caption) --
-    so a broken image never costs the user the rest of the listing's information.
+    A listing with a photo goes out as TWO messages: sendPhoto with a header-only caption
+    (title/price/year/km/location/link -- comfortably fits Telegram's 1024-char caption
+    cap on its own), followed by a plain sendMessage carrying the FULL body (translated
+    description + every AI Q&A answer). Cramming the body into the caption too (the
+    previous approach) meant long descriptions or several questions routinely got cut off
+    mid-sentence to fit 1024 chars -- splitting into two messages sidesteps that cap
+    entirely, since sendMessage allows up to 4096 chars.
+
+    If sendPhoto itself fails (most commonly: Telegram couldn't fetch the marketplace's
+    image URL), falls back to a single sendMessage with the FULL header+body text instead
+    -- so a broken image never costs the user any information.
     """
     _require_configured(settings, chat_id)
-    text, photo_url = render_telegram_message(match)
+    header = _header(match.listing)
+    body = _body(match)
+    full_text, photo_url = render_telegram_message(match)
     base = f"{TELEGRAM_API}/bot{settings.telegram_bot_token}"
 
     if photo_url:
         try:
             _post(
                 f"{base}/sendPhoto",
-                {"chat_id": chat_id, "photo": photo_url, "caption": render_caption(match), "parse_mode": "HTML"},
+                {"chat_id": chat_id, "photo": photo_url, "caption": header[:_CAPTION_LIMIT], "parse_mode": "HTML"},
+            )
+        except TelegramApiError:
+            _post(
+                f"{base}/sendMessage",
+                {"chat_id": chat_id, "text": full_text, "parse_mode": "HTML", "disable_web_page_preview": False},
             )
             return
-        except TelegramApiError:
-            pass  # fall through to the full text message below
+        if body:
+            _post(
+                f"{base}/sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": _safe_truncate(body, _MESSAGE_LIMIT),
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+            )
+        return
 
     _post(
         f"{base}/sendMessage",
-        {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False},
+        {"chat_id": chat_id, "text": full_text, "parse_mode": "HTML", "disable_web_page_preview": False},
     )

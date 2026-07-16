@@ -142,8 +142,48 @@ def test_send_telegram_match_sends_photo_when_available(monkeypatch):
     )
     settings = Settings(telegram_bot_token="TOKEN")
     send_telegram_match(settings, "12345", _match())
+    # Photo caption (header only) + a separate follow-up message carrying the full body,
+    # so long descriptions/Q&A never get truncated to fit the 1024-char caption cap.
+    assert len(calls) == 2
+    assert "sendPhoto" in calls[0][0]
+    assert "Tesla Model S 75D" in calls[0][1]["caption"]
+    assert "Very well maintained." not in calls[0][1]["caption"]
+    assert "sendMessage" in calls[1][0]
+    assert "Very well maintained." in calls[1][1]["text"]
+    assert "Looks great" in calls[1][1]["text"]
+
+
+def test_send_telegram_match_photo_with_no_body_sends_single_message(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "deal_finder.notify.telegram.httpx.post",
+        lambda url, json, timeout: calls.append((url, json)) or FakeResponse(),
+    )
+    settings = Settings(telegram_bot_token="TOKEN")
+    match = _match(desc="")
+    match.enrichment.translated_description = None
+    match.questions = []
+    send_telegram_match(settings, "12345", match)
     assert len(calls) == 1
     assert "sendPhoto" in calls[0][0]
+
+
+def test_send_telegram_match_long_body_not_truncated(monkeypatch):
+    """The bug this guards against: a long description + several Q&A answers used to be
+    crammed into the 1024-char photo caption and cut off mid-sentence."""
+    calls = []
+    monkeypatch.setattr(
+        "deal_finder.notify.telegram.httpx.post",
+        lambda url, json, timeout: calls.append((url, json)) or FakeResponse(),
+    )
+    settings = Settings(telegram_bot_token="TOKEN")
+    long_desc = "All services were performed at Tesla. " * 40  # well over 1024 chars alone
+    match = _match()
+    match.enrichment.translated_description = long_desc
+    send_telegram_match(settings, "12345", match)
+    body_text = calls[1][1]["text"]
+    assert long_desc.strip() in body_text
+    assert not body_text.endswith("…")
 
 
 def test_send_telegram_match_no_photo_sends_message_directly(monkeypatch):

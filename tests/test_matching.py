@@ -3,11 +3,28 @@ from __future__ import annotations
 from datetime import datetime
 
 from deal_finder.adapters.base import Listing
+from deal_finder.ai.client import AiUnavailable
 from deal_finder.categories.car import CarCategory
-from deal_finder.matching import dedup_cross_marketplace, passes_filters
+from deal_finder.config import Settings
+from deal_finder.matching import dedup_cross_marketplace, filter_rejection_reason, passes_filters
 from deal_finder.models import Watch
 
 CAT = CarCategory()
+
+
+class StubAiClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+
+    def chat(self, messages, **kwargs):
+        self.calls += 1
+        return self.responses.pop(0)
+
+
+class RaisingAiClient:
+    def chat(self, messages, **kwargs):
+        raise AiUnavailable("server down")
 
 
 def _listing(**kw):
@@ -75,6 +92,66 @@ def test_location_filter():
     q = CAT.build_query(w)
     assert not passes_filters(_listing(location="Zürich", description="x"), q, CAT, w)
     assert passes_filters(_listing(location="Genève", description="x"), q, CAT, w)
+
+
+def test_non_negotiables_skipped_when_blank():
+    w = _watch(filters={"non_negotiables": "   "})
+    q = CAT.build_query(w)
+    client = StubAiClient([])
+    assert passes_filters(_listing(), q, CAT, w)  # no settings/ai_client at all
+    assert filter_rejection_reason(_listing(), q, CAT, w, settings=Settings(ai_enabled=True), ai_client=client) is None
+    assert client.calls == 0  # blank requirement text -> never even calls the model
+
+
+def test_non_negotiables_skipped_without_settings():
+    """Existing callers that don't pass settings/ai_client (e.g. other tests, or a
+    context with no known settings) must not be affected by a non_negotiables filter."""
+    w = _watch(filters={"non_negotiables": "must be green"})
+    q = CAT.build_query(w)
+    assert passes_filters(_listing(), q, CAT, w)
+
+
+def test_non_negotiables_rejects_on_ai_fail():
+    w = _watch(filters={"non_negotiables": "must be green"})
+    q = CAT.build_query(w)
+    client = StubAiClient(["FAIL: the car is red, not green"])
+    reason = filter_rejection_reason(
+        _listing(), q, CAT, w, settings=Settings(ai_enabled=True), ai_client=client
+    )
+    assert reason is not None
+    assert "red, not green" in reason
+    assert client.calls == 1
+
+
+def test_non_negotiables_passes_on_ai_pass():
+    w = _watch(filters={"non_negotiables": "must be green"})
+    q = CAT.build_query(w)
+    client = StubAiClient(["PASS"])
+    assert filter_rejection_reason(
+        _listing(), q, CAT, w, settings=Settings(ai_enabled=True), ai_client=client
+    ) is None
+
+
+def test_non_negotiables_fails_open_when_ai_unavailable():
+    """An AI hiccup on this specific check must never silently hide a real match."""
+    w = _watch(filters={"non_negotiables": "must be green"})
+    q = CAT.build_query(w)
+    assert filter_rejection_reason(
+        _listing(), q, CAT, w, settings=Settings(ai_enabled=True), ai_client=RaisingAiClient()
+    ) is None
+
+
+def test_non_negotiables_never_called_when_a_cheap_filter_already_failed():
+    """The AI check runs LAST -- a listing already rejected by price/keyword/etc. must
+    never pay for an AI call at all."""
+    w = _watch(filters={"price_max": 1000, "non_negotiables": "must be green"})
+    q = CAT.build_query(w)
+    client = StubAiClient([])
+    reason = filter_rejection_reason(
+        _listing(price=38900), q, CAT, w, settings=Settings(ai_enabled=True), ai_client=client
+    )
+    assert reason is not None and "price" in reason
+    assert client.calls == 0
 
 
 def test_cross_marketplace_dedup():
