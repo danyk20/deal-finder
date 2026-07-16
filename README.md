@@ -25,7 +25,7 @@ brew install python@3.13 pipenv
 **2. Install the app:**
 
 ```bash
-git clone <this-repo> && cd deal_finder
+git clone https://github.com/danyk20/deal-finder.git && cd deal_finder
 export PIPENV_VENV_IN_PROJECT=1   # keep the virtualenv in ./.venv
 pipenv install --dev
 cp .env.example .env              # optional — everything can be set later in the UI
