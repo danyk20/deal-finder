@@ -27,6 +27,10 @@ dependencies = [
     # past Cloudflare's Managed Challenge — self-contained, no shared deal_finder
     # browser session/profile needed for this adapter anymore.
     "ricardo-scraper>=0.2.0",
+    # Autolina.ch: parses the site's server-rendered HTML directly (autolina.ch) via the
+    # autolina-scraper package — mirrors autoscout24-scraper's design/signatures, but no
+    # public JSON API is involved; plain requests, no browser needed for this adapter.
+    "autolina-scraper>=0.1.0",
 ]
 
 [project.optional-dependencies]

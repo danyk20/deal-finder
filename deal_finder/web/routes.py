@@ -226,6 +226,7 @@ _BOOL_SETTINGS = {
     "adapter_tutti_enabled",
     "adapter_ricardo_enabled",
     "adapter_autoscout24_enabled",
+    "adapter_autolina_enabled",
     "adapter_facebook_enabled",
 }
 _MASKED_SETTINGS = {"smtp_password", "facebook_password", "telegram_bot_token"}

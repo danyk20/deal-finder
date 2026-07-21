@@ -83,6 +83,7 @@ def _adapter_enabled(key: str, settings: Settings) -> bool:
         "tutti": settings.adapter_tutti_enabled,
         "ricardo": settings.adapter_ricardo_enabled,
         "autoscout24": settings.adapter_autoscout24_enabled,
+        "autolina": settings.adapter_autolina_enabled,
         "facebook": settings.adapter_facebook_enabled,
     }.get(key, True)
 

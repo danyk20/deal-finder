@@ -97,6 +97,10 @@
       <span class="check-row-main"><input type="checkbox" name="adapter_autoscout24_enabled" {{ 'checked' if values.adapter_autoscout24_enabled else '' }}> AutoScout24.ch</span>
       <small class="check-row-hint">Public JSON API, no browser or bypass needed.</small>
     </label>
+    <label class="check-row">
+      <span class="check-row-main"><input type="checkbox" name="adapter_autolina_enabled" {{ 'checked' if values.adapter_autolina_enabled else '' }}> Autolina.ch</span>
+      <small class="check-row-hint">Parses autolina.ch's own listing pages directly, no browser needed.</small>
+    </label>
     <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_facebook_enabled" {{ 'checked' if values.adapter_facebook_enabled else '' }}> Facebook Marketplace</span></label>
   </fieldset>
 
