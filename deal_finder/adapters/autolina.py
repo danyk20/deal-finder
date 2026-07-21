@@ -3,17 +3,17 @@
 with autoscout24-scraper but parses the site's own server-rendered HTML directly rather
 than calling a JSON API. Plain ``requests``, no browser, no anti-bot bypass.
 
-Single ``scrape()`` call (unlike autoscout24's two-phase search/detail split): the
-package fetches every matching listing's detail page internally as part of one call
-when ``detail=True`` (the default, used here for the richest field set). There is no
-public way to cap how many listings get a detail-page visit before that call returns —
-unlike ``browser_max_items_per_run`` capping used by the autoscout24/ricardo adapters,
-a broad watch (a popular make/model with hundreds of results) means a slower scan and
-more requests against autolina.ch every run. Accepted tradeoff for full data richness.
+Single ``scrape()`` call (unlike autoscout24's two-phase search/detail split), but capped
+the same way: ``max_results=settings.browser_max_items_per_run`` bounds how many listings
+get the expensive per-listing detail-page visit when ``detail=True`` (the default, used
+here for the richest field set). Note this caps *cost*, not "top N by some criterion" --
+autolina.ch's search doesn't return listings in a guaranteed price/date order the way
+autoscout24's API does, so (unlike that adapter) there's no pre-detail sort to bias
+towards the newest listings first.
 
-autolina.ch listings have no free-text seller description at all (confirmed against
-real listings) — every fact lives in structured spec rows instead, so ``Listing.attributes``
-is where the AI's grounding comes from; ``description`` is typically empty.
+Most listings carry no free-text seller description (autolina.ch's own UI is spec-first),
+but private-seller listings often do -- both are mapped into ``Listing.title``/``description``
+when present, falling back to a make+trim title and empty description otherwise.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any
 
 from autolina_scraper import scrape
 
-from ..config import Settings
+from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.autolina")
@@ -65,7 +65,7 @@ _SKIP_KEYS = {
     "constructionYear", "mileage", "kilometer", "powerOutput", "leistung_hubraum",
     "isNew", "isPremium", "imageUrl", "images", "location", "dealer",
     "serienmaessige_ausstattung", "optionale_ausstattung",
-    "hitCount", "lastUpdatedDateLabel",
+    "hitCount", "lastUpdatedDateLabel", "adTitle", "beschreibung",
 }
 
 _EQUIPMENT_ATTRIBUTE_NAMES = {
@@ -129,7 +129,8 @@ def listing_from_api_item(item: dict) -> Listing | None:
 
     make = (item.get("make") or "").strip()
     model_type = (item.get("modelType") or "").strip()
-    title = " ".join(p for p in (make, model_type) if p).strip()
+    fallback_title = " ".join(p for p in (make, model_type) if p).strip()
+    title = (item.get("adTitle") or "").strip() or fallback_title
     if not title:
         return None
 
@@ -139,7 +140,7 @@ def listing_from_api_item(item: dict) -> Listing | None:
         external_id=str(ext_id),
         url=item.get("url") or "",
         title=title,
-        description="",  # autolina.ch listings carry no free-text seller description
+        description=(item.get("beschreibung") or "").strip(),
         price=float(price) if isinstance(price, (int, float)) else None,
         currency="CHF",
         location=(item.get("location") or None),
@@ -156,6 +157,7 @@ class AutolinaAdapter(BaseAdapter):
     status_note = "public HTML parsing (autolina.ch) via the autolina-scraper package — no browser needed"
 
     def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
+        settings = settings or get_settings()
         p = query.params or {}
         make, model = (p.get("make") or "").strip(), (p.get("model") or "").strip()
         if not make or not model:
@@ -171,6 +173,7 @@ class AutolinaAdapter(BaseAdapter):
                 mileage_to=int(p["mileage_max"]) if p.get("mileage_max") else None,
                 year_from=int(p["year_min"]) if p.get("year_min") else None,
                 year_to=int(p["year_max"]) if p.get("year_max") else None,
+                max_results=settings.browser_max_items_per_run,
                 delay=1.0,
                 verbose=False,
             )
@@ -183,7 +186,7 @@ class AutolinaAdapter(BaseAdapter):
 
     def health_check(self) -> bool:
         try:
-            scrape("Tesla", "Model S", detail=False, verbose=False)
+            scrape("Tesla", "Model S", detail=False, max_results=1, verbose=False)
             return True
         except Exception:  # noqa: BLE001
             return False

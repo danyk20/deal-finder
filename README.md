@@ -86,7 +86,7 @@ notify you, which marketplaces), then click **Run now**.
 | **tutti.ch** | Public GraphQL API via [tutti-scraper](https://pypi.org/project/tutti-scraper/) | none | Searches tutti's `cars` category with structured make/year/mileage. |
 | **Ricardo.ch** | Bundled Camoufox browser via [ricardo-scraper](https://pypi.org/project/ricardo-scraper/) | none | Handles Cloudflare itself, fully self-contained. |
 | **AutoScout24.ch** | Public JSON API via [autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/) | none | Biggest Swiss car inventory; no anti-bot measures at all. |
-| **Autolina.ch** | Server-rendered HTML via [autolina-scraper](https://pypi.org/project/autolina-scraper/) | none | No free-text description on this site — rich structured spec data instead (VIN, energy data, equipment, dealer info). |
+| **Autolina.ch** | Server-rendered HTML via [autolina-scraper](https://pypi.org/project/autolina-scraper/) | none | Rich structured spec data (VIN, energy data, equipment, dealer info); free-text description when the seller wrote one. |
 | **Facebook Marketplace** | Playwright browser via [facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/) | `pipenv run fb-login` once | **Automating Facebook violates its ToS and risks an account ban** — use a dedicated account. |
 | **Demo** | Canned offline listings | none | Try the full pipeline without any network. |
 
