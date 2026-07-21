@@ -148,9 +148,11 @@ def test_search_happy_path(monkeypatch):
 
 
 def test_search_passes_browser_max_items_per_run_as_max_results(monkeypatch):
-    """Regression: autolina-scraper >=0.2.0's `max_results` caps the number of listings
-    that get an expensive per-listing detail-page visit -- must be wired to the same
-    setting the other adapters use to bound their own detail-fetch cost."""
+    """Regression: autolina-scraper's `max_results` caps the number of listings that get
+    an expensive per-listing detail-page visit -- must be wired to the same setting the
+    other adapters use to bound their own detail-fetch cost. Since 0.3.0 the package
+    itself also sorts candidates newest-first (by carId descending) before applying this
+    cap, so it means "the newest N" rather than an arbitrary site-returned order."""
     captured_kwargs = {}
 
     def fake_scrape(make, model, **kwargs):

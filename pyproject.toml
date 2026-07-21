@@ -31,8 +31,10 @@ dependencies = [
     # autolina-scraper package — mirrors autoscout24-scraper's design/signatures, but no
     # public JSON API is involved; plain requests, no browser needed for this adapter.
     # >=0.2.0 adds the `max_results` cap on scrape()'s detail-fetch phase, and detail-page
-    # description/adTitle extraction (both missing in 0.1.0).
-    "autolina-scraper>=0.2.0",
+    # description/adTitle extraction (both missing in 0.1.0). >=0.3.1 makes max_results
+    # mean "the newest N" (results sorted newest-first by carId descending) rather than
+    # an arbitrary site-returned order.
+    "autolina-scraper>=0.3.1",
 ]
 
 [project.optional-dependencies]

@@ -6,10 +6,11 @@ than calling a JSON API. Plain ``requests``, no browser, no anti-bot bypass.
 Single ``scrape()`` call (unlike autoscout24's two-phase search/detail split), but capped
 the same way: ``max_results=settings.browser_max_items_per_run`` bounds how many listings
 get the expensive per-listing detail-page visit when ``detail=True`` (the default, used
-here for the richest field set). Note this caps *cost*, not "top N by some criterion" --
-autolina.ch's search doesn't return listings in a guaranteed price/date order the way
-autoscout24's API does, so (unlike that adapter) there's no pre-detail sort to bias
-towards the newest listings first.
+here for the richest field set). Since autolina-scraper 0.3.0, the package itself sorts
+candidates newest-first (by ``carId`` descending, autolina.ch's own auto-incrementing
+listing ID) before applying that cap, so -- like the autoscout24 adapter's own explicit
+newest-first sort -- a broad watch reliably sees the newest listings each run rather than
+an arbitrary subset.
 
 Most listings carry no free-text seller description (autolina.ch's own UI is spec-first),
 but private-seller listings often do -- both are mapped into ``Listing.title``/``description``
