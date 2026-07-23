@@ -146,31 +146,15 @@ def listing_from_api_item(item: dict) -> Listing | None:
     # `modelVariant` is the actual battery/trim code (e.g. "P90D (Free Supercharging)",
     # "100 D") -- exactly the piece previously missing that made a trim-specific watch
     # ("Model S90") fail to match a genuinely matching listing. It's part of the
-    # vehicle identity, so it belongs in vehicle_title itself, not bolted on afterward.
-    vehicle_title = " ".join(str(p) for p in (make, model, model_variant, year) if p)
-
-    name = (item.get("name") or "").strip()
-    # `name` is AutoUncle's own auto-generated headline (e.g. "Gebraucht 2015 Tesla
-    # Model S Performance 772 PS") and usually already carries the make/model -- but it
-    # does NOT reliably carry `modelVariant`'s exact battery/trim code (it says
-    # "Performance", a rough tier word, not "P90D"), so `name` can never be trusted
-    # alone (same principle as the Autolina fix, one level stricter): always lead with
-    # the structured vehicle_title -- which does carry modelVariant -- and append `name`
-    # afterward for its own extra context, when it's not just a duplicate.
-    base_title = " — ".join(p for p in (vehicle_title, name if name and name != vehicle_title else None) if p)
-
-    # `modelVariant` isn't always present (older/thinner listings, or a card this
-    # release's parser couldn't confidently read), and even when present it doesn't
-    # cover every possible watch phrasing -- so still surface every other spec fact
-    # AutoUncle splits across separate fields (power in kW alongside name's PS,
-    # transmission, fuel type) directly in the title, so a listing is judgable at a
-    # glance from the filtered-out list instead of only via a click-through.
-    # (bodyType is deliberately excluded -- confirmed unreliable, e.g. a real Model S
-    # sedan reported as "Kleinwagen"/subcompact.)
-    power_kw = item.get("enginePowerKw")
-    spec_bits = [f"{power_kw} kW" if power_kw else None, item.get("transmission"), item.get("fuelType")]
-    spec_suffix = ", ".join(b for b in spec_bits if b)
-    title = f"{base_title} ({spec_suffix})" if base_title and spec_suffix else base_title
+    # vehicle identity, so it belongs in the title itself.
+    #
+    # `name` (AutoUncle's own auto-generated headline, e.g. "Gebraucht 2015 Tesla Model
+    # S Performance 772 PS") and per-field power/transmission/fuel used to be appended
+    # here too, but both are redundant with `description` (AutoUncle generates both from
+    # the same handful of facts -- confirmed live) and just cluttered the title (e.g. in
+    # the "Run now" results table) without adding anything a reader couldn't already get
+    # from `description`/`attributes`. Title is now just the vehicle identity.
+    title = " ".join(str(p) for p in (make, model, model_variant, year) if p)
     if not title:
         return None
 

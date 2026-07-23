@@ -55,27 +55,36 @@ def test_listing_from_api_item_real_fixture():
     assert "TESLA" in li.title and "Model S" in li.title  # vehicle identity always present
 
 
-def test_listing_from_api_item_uses_ad_title_and_description_when_present():
-    """Regression: autolina-scraper >=0.2.0 added the seller's own ad headline
-    (`adTitle`) and free-text description (`beschreibung`) -- both mostly seen on
-    private-seller listings. `adTitle` is often pure marketing text with no make/model
-    mention at all (e.g. "FRISCH AB MFK + FRISCH AB SERVICE + AUS 1 - HAND") -- it must
-    be appended to, not replace, the make+trim title. Replacing it used to drop the
-    vehicle identity entirely, which made the matching engine reject genuinely matching
-    listings with "search term 'Tesla' not found in the listing's title/description"."""
+def test_listing_from_api_item_title_is_pure_vehicle_identity():
+    """Regression (reported): appending `adTitle` to the title cluttered an otherwise
+    clean "<make> <modelType>" (e.g. in the "Run now" results table) with marketing
+    text. Title must be just the vehicle identity; `adTitle` moves to `description`
+    instead of being dropped, since it can carry a real, unique fact (e.g. "Kein Free
+    Supercharger") not present in the structured description."""
     item = next(i for i in _FIXTURE if i.get("adTitle") and i.get("beschreibung"))
     li = listing_from_api_item(item)
-    vehicle_title = f"{item['make']} {item['modelType']}"
-    assert li.title == f"{vehicle_title} — {item['adTitle']}"
-    assert item["make"] in li.title and item["adTitle"] in li.title
+    assert li.title == f"{item['make']} {item['modelType']}"
+    assert item["adTitle"] not in li.title
+    assert li.description == f"{item['adTitle']}\n\n{item['beschreibung']}"
+
+
+def test_listing_from_api_item_ad_title_not_duplicated_into_description():
+    """When `adTitle` is already redundant with `beschreibung` (both mention the exact
+    same facts), it must not be prepended a second time."""
+    item = next(
+        i for i in _FIXTURE if i.get("adTitle") and i.get("beschreibung", "").lower().count(i["adTitle"].lower())
+    )
+    li = listing_from_api_item(item)
     assert li.description == item["beschreibung"]
+    assert li.description.count(item["adTitle"]) == 1
 
 
 def test_listing_from_api_item_ad_title_never_hides_vehicle_identity():
-    """Regression (reported bug): a purely promotional adTitle with no make/model
-    mention at all must not replace the vehicle-identity title -- otherwise a watch
-    searching for "Tesla"/"Model S" rejects an exact-matching listing because neither
-    term appears anywhere in title+description."""
+    """Regression (originally reported bug): a purely promotional adTitle with no
+    make/model mention at all must not replace the vehicle-identity title -- otherwise a
+    watch searching for "Tesla"/"Model S" rejects an exact-matching listing because
+    neither term appears anywhere in title+description. Now also verifies the ad
+    headline is preserved (in description, not title) rather than just dropped."""
     item = {
         "carId": 1,
         "make": "TESLA",
@@ -83,8 +92,9 @@ def test_listing_from_api_item_ad_title_never_hides_vehicle_identity():
         "adTitle": "FRISCH AB MFK + FRISCH AB SERVICE + AUS 1 - HAND",
     }
     li = listing_from_api_item(item)
-    assert "TESLA" in li.title and "Model S 90 D" in li.title
-    assert "FRISCH AB MFK" in li.title  # ad headline still preserved, just appended
+    assert li.title == "TESLA Model S 90 D"
+    assert "FRISCH AB MFK" not in li.title
+    assert "FRISCH AB MFK" in li.description
     assert "tesla" in li.searchable_text and "model s 90 d" in li.searchable_text
 
 

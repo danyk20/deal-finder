@@ -43,10 +43,7 @@ def test_listing_from_api_item_real_fixture():
     assert li.marketplace == "autouncle"
     assert li.external_id == "6910126"
     assert li.url == "https://www.autouncle.ch/de-ch/d/6910126"
-    assert li.title == (
-        "Tesla Model S P90D (Free Supercharging) 2017 — Gebraucht 2017 Tesla Model S 772 PS "
-        "(Automatikgetriebe, Elektro)"
-    )
+    assert li.title == "Tesla Model S P90D (Free Supercharging) 2017"
     assert li.price == 24000.0 and li.currency == "CHF"
     assert li.location == "7546 Ardez"
     assert li.attributes["year"] == 2017
@@ -106,35 +103,38 @@ def test_listing_from_api_item_unknown_fields_reach_ai_via_catchall():
     assert li.attributes["someNewField"] == "value"
 
 
-def test_listing_from_api_item_enriches_title_with_split_spec_fields():
-    """Regression (reported issue): before `modelVariant` existed, AutoUncle had no
-    field anywhere for the battery/trim code -- surface every other spec fact AutoUncle
-    splits across separate fields (kW, transmission, fuel) directly in the title too, so
-    a listing without a `modelVariant` is still judgable at a glance."""
+def test_listing_from_api_item_title_is_pure_vehicle_identity():
+    """Regression (reported): `name` and per-field power/transmission/fuel used to be
+    appended to the title, but both are redundant with `description` (AutoUncle
+    generates both from the same handful of facts) and just cluttered the title (e.g.
+    in the "Run now" results table). Title must be just make+model+modelVariant+year,
+    regardless of what `name`/spec fields say -- that richer info is still available via
+    `description`/`attributes`, just not duplicated into the title."""
     item = {
         "id": "1",
         "make": "Tesla",
         "model": "Model S",
         "year": 2015,
+        "modelVariant": "P90D (Free Supercharging)",
         "name": "Gebraucht 2015 Tesla Model S Performance 772 PS",
+        "description": "Gebraucht Tesla Model S Performance. 133.000 km, Automatik, 772 PS.",
         "enginePowerKw": 568,
         "transmission": "Automatikgetriebe",
         "fuelType": "Elektro",
-        "bodyType": "Kleinwagen",  # deliberately excluded from title -- confirmed unreliable
     }
     li = listing_from_api_item(item)
-    assert li.title == "Tesla Model S 2015 — Gebraucht 2015 Tesla Model S Performance 772 PS (568 kW, Automatikgetriebe, Elektro)"
-    assert "Kleinwagen" not in li.title
+    assert li.title == "Tesla Model S P90D (Free Supercharging) 2015"
+    assert "Performance" not in li.title and "772" not in li.title
+    assert li.description == item["description"]  # untouched, still carries the rest
 
 
-def test_listing_from_api_item_title_leads_with_vehicle_identity_when_name_lacks_it():
-    """Regression: mirrors the Autolina fix -- if `name` were ever missing the make/model
-    (defensive; not observed live for AutoUncle, but must not silently lose identity if it
-    happens), the structured vehicle_title must lead instead."""
+def test_listing_from_api_item_title_ignores_name_even_when_it_lacks_identity():
+    """`name` is never appended to the title anymore (unlike the earlier Autolina-style
+    fix), so this holds regardless of whether `name` mentions the make/model or not."""
     item = {"id": "1", "make": "Tesla", "model": "Model S", "year": 2015, "name": "Top gepflegtes Fahrzeug"}
     li = listing_from_api_item(item)
-    assert li.title.startswith("Tesla Model S 2015")
-    assert "Top gepflegtes Fahrzeug" in li.title
+    assert li.title == "Tesla Model S 2015"
+    assert "Top gepflegtes Fahrzeug" not in li.title
 
 
 def test_listing_from_api_item_falls_back_to_make_model_title():

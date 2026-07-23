@@ -13,8 +13,11 @@ newest-first sort -- a broad watch reliably sees the newest listings each run ra
 an arbitrary subset.
 
 Most listings carry no free-text seller description (autolina.ch's own UI is spec-first),
-but private-seller listings often do -- both are mapped into ``Listing.title``/``description``
-when present, falling back to a make+trim title and empty description otherwise.
+but private-seller listings often do -- mapped into ``Listing.description``. The seller's
+own ad headline (``adTitle``) is folded into ``description`` too rather than the title:
+it often doesn't mention the make/model at all, so using it as (part of) the title either
+lost the vehicle identity or cluttered an otherwise clean "<make> <model>" title with
+marketing text -- ``Listing.title`` is always just the vehicle identity.
 """
 
 from __future__ import annotations
@@ -130,19 +133,21 @@ def listing_from_api_item(item: dict) -> Listing | None:
 
     make = (item.get("make") or "").strip()
     model_type = (item.get("modelType") or "").strip()
-    vehicle_title = " ".join(p for p in (make, model_type) if p).strip()
-    ad_title = (item.get("adTitle") or "").strip()
-    # `adTitle` is the seller's own marketing headline (e.g. "FRISCH AB MFK + FRISCH AB
-    # SERVICE + AUS 1 - HAND") and often doesn't mention the make/model at all. It must
-    # never fully replace `vehicle_title` -- the matching engine requires every watch
-    # search term (make, model) to appear somewhere in title+description
-    # (matching.py's filter_rejection_reason), so dropping the vehicle name here caused
-    # genuinely matching listings to be rejected as "search term 'Tesla' not found".
-    # Append the ad headline instead, for the extra human/AI-facing context it usually
-    # carries (mileage/condition claims, etc.), rather than dropping it.
-    title = " — ".join(p for p in (vehicle_title, ad_title if ad_title != vehicle_title else None) if p)
+    title = " ".join(p for p in (make, model_type) if p).strip()
     if not title:
         return None
+
+    # `adTitle` is the seller's own marketing headline (e.g. "FRISCH AB MFK + FRISCH AB
+    # SERVICE + AUS 1 - HAND") and often doesn't mention the make/model at all -- it must
+    # never replace the vehicle-identity title (that caused genuinely matching listings
+    # to be rejected as "search term 'Tesla' not found"), and appending it directly to
+    # the title just clutters an otherwise clean "<make> <model>" (e.g. in the "Run now"
+    # results table). It can still carry a real, unique fact (e.g. "Kein Free
+    # Supercharger") not present in the structured description, so fold it into
+    # `description` instead of discarding it, when it isn't already redundant with that.
+    ad_title = (item.get("adTitle") or "").strip()
+    beschreibung = (item.get("beschreibung") or "").strip()
+    description = "\n\n".join(p for p in (ad_title if ad_title.lower() not in beschreibung.lower() else None, beschreibung) if p)
 
     price = item.get("price")
     return Listing(
@@ -150,7 +155,7 @@ def listing_from_api_item(item: dict) -> Listing | None:
         external_id=str(ext_id),
         url=item.get("url") or "",
         title=title,
-        description=(item.get("beschreibung") or "").strip(),
+        description=description,
         price=float(price) if isinstance(price, (int, float)) else None,
         currency="CHF",
         location=(item.get("location") or None),
