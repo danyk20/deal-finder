@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from deal_finder.adapters import autouncle
-from deal_finder.adapters.autouncle import AutoUncleAdapter, listing_from_api_item
+from deal_finder.adapters.autouncle import AutoUncleAdapter, _find_unambiguous_model_match, listing_from_api_item
 from deal_finder.adapters.base import AdapterError, MarketplaceQuery
 from deal_finder.config import Settings
 
@@ -155,6 +155,63 @@ def test_search_passes_browser_max_items_per_run_as_max_results(monkeypatch):
 
     assert captured_kwargs["max_results"] == 5
     assert len(listings) == 5
+
+
+def test_find_unambiguous_model_match_trim_variant():
+    """Regression: real reported error -- 'Model S90' isn't a listed model itself (it's
+    a trim/variant of 'Model S'), but the match must be unambiguous to auto-correct."""
+    msg = (
+        "Could not find a model matching 'Model S90' for brand 'Tesla'. "
+        "Available: Cybertruck, Model 3, Model S, Model X, Model Y, Roadster"
+    )
+    assert _find_unambiguous_model_match("Model S90", msg) == "Model S"
+
+
+def test_find_unambiguous_model_match_ambiguous_returns_none():
+    msg = "Could not find a model matching 'Model' for brand 'Tesla'. Available: Model S, Model X"
+    assert _find_unambiguous_model_match("Model", msg) is None
+
+
+def test_find_unambiguous_model_match_no_available_list_returns_none():
+    assert _find_unambiguous_model_match("Model S90", "Could not find a make matching 'Teslaa'") is None
+
+
+def test_search_retries_with_corrected_model_on_unambiguous_match(monkeypatch):
+    """Regression: the exact reported failure -- a trim/variant model query ('Model S90')
+    should transparently retry with the single unambiguous listed model ('Model S')
+    rather than failing the whole watch run."""
+    calls = []
+
+    def fake_scrape(make, model, **kwargs):
+        calls.append(model)
+        if model == "Model S90":
+            raise ValueError(
+                "Could not find a model matching 'Model S90' for brand 'Tesla'. "
+                "Available: Cybertruck, Model 3, Model S, Model X, Model Y, Roadster"
+            )
+        return _result(_FIXTURE[:2])
+
+    monkeypatch.setattr(autouncle, "scrape", fake_scrape)
+    listings = list(AutoUncleAdapter().search(_query(make="Tesla", model="Model S90")))
+
+    assert calls == ["Model S90", "Model S"]
+    assert len(listings) == 2
+
+
+def test_search_does_not_retry_on_ambiguous_model_error(monkeypatch):
+    calls = []
+
+    def fake_scrape(make, model, **kwargs):
+        calls.append(model)
+        raise ValueError(
+            f"Could not find a model matching {model!r} for brand 'Tesla'. Available: Model S, Model X"
+        )
+
+    monkeypatch.setattr(autouncle, "scrape", fake_scrape)
+    with pytest.raises(AdapterError, match="AutoUncle.ch"):
+        list(AutoUncleAdapter().search(_query(make="Tesla", model="Model")))
+
+    assert calls == ["Model"]  # no retry attempted -- ambiguous, refuses to guess
 
 
 def test_search_unknown_make_raises_adapter_error(monkeypatch):
