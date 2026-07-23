@@ -1,16 +1,12 @@
 """AutoUncle.ch adapter — uses the `autouncle-scraper` PyPI package
 (https://pypi.org/project/autouncle-scraper/), which parses schema.org JSON-LD (for
-unfiltered searches and every detail page) plus a filtered-search RSC/GraphQL path — no
-login, no browser. AutoUncle explicitly marks its listing data CC BY 4.0.
+unfiltered searches) plus a filtered-search RSC/GraphQL path — no login, no browser.
+AutoUncle explicitly marks its listing data CC BY 4.0.
 
-``detail=True`` is not optional here, unlike the AutoScout24/Autolina adapters: as soon
-as ANY price/mileage/year filter is set (true of almost every real watch), AutoUncle's
-own filtered-search path returns bare listing ids with no summary fields at all -- only
-a detail-page visit fills those in. ``max_results=settings.browser_max_items_per_run``
-bounds that detail-fetch phase (verified against 0.3.0's actual source: the candidate
-list is sliced *before* ``visit_all_listings`` runs, not after -- 0.1.0 had no cap at
-all, and 0.2.0's cap only trimmed the *returned* set while still detail-fetching every
-match, since recency ("firstSeenAt") is itself a detail-only field).
+``max_results=settings.browser_max_items_per_run`` bounds the detail-fetch phase
+(verified against 0.3.0's actual source: the candidate list is sliced *before* the
+detail visit runs, not after -- 0.1.0 had no cap at all, and 0.2.0's cap only trimmed
+the *returned* set while still detail-fetching every match).
 
 Residual limitation, confirmed live and accepted rather than silently hidden: the
 *search* (id-collection) phase always pages through the entire match count first,
@@ -18,8 +14,24 @@ regardless of ``max_results`` -- only the detail-fetch phase is bounded. A very 
 loosely-filtered watch can still mean a slow-ish scan (tens of seconds), just not the
 many-minutes risk that existed pre-0.3.0. Also, ``max_results`` keeps "the first N
 AutoUncle's own search returns" -- not confirmed newest-first (unlike Autolina's
-``carId``-descending guarantee), since AutoUncle exposes no cheap recency signal outside
-of `firstSeenAt`.
+``carId``-descending guarantee), since AutoUncle exposes no cheap recency signal.
+
+This adapter calls the search/detail building blocks directly rather than the
+`scrape()` convenience wrapper, specifically to work around a gap confirmed live in
+0.4.0: that version added a search-summary-only "modelVariant" field (Tesla's actual
+battery/trim code, e.g. "P90D (Free Supercharging)", "100 D") -- exactly the piece
+previously missing that made trim-specific watches fail to match genuinely matching
+listings. But `scrape(detail=True)` (which every real watch needs -- see below) fully
+*replaces* each listing with a fresh per-id detail-page fetch instead of merging, and
+`modelVariant` has no equivalent field on the detail page at all, so it silently
+vanishes the moment `detail=True` is used. Calling `search_listings`/
+`search_listings_filtered` and `visit_all_listings` ourselves and merging (detail
+values win when both have one; search-summary-only fields like `modelVariant`,
+`priceChangePercent`, `estimatedMarketPriceChf`, `sourcePath` survive since detail
+never sets them) keeps everything. ``detail`` is still effectively mandatory: as soon
+as ANY price/mileage/year filter is set (true of almost every real watch), the search
+summary alone has no fuel type/transmission/engine power/CO2 figures -- only a detail
+visit fills those in.
 """
 
 from __future__ import annotations
@@ -39,13 +51,21 @@ from autouncle_scraper import (
     make_session,
     resolve_make_key,
     resolve_model_key,
-    scrape,
+    search_listings,
+    search_listings_filtered,
+    visit_all_listings,
 )
 
 from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.autouncle")
+
+# CarSearchInput keys that only identify make/model (mirrors autouncle-scraper's own
+# private `_CAR_SEARCH_INPUT_PATH_KEYS` -- kept as a local literal rather than importing
+# a leading-underscore name). Any other key present means the search needs the
+# filtered/RSC path instead of plain unfiltered JSON-LD.
+_CAR_SEARCH_INPUT_IDENTITY_KEYS = frozenset({"brand", "carModel", "brandsModels"})
 
 # autouncle-scraper's resolve_model_key() only matches a query that is a substring of a
 # listed model name -- unlike its sibling packages (autoscout24-scraper, autolina-scraper),
@@ -87,16 +107,21 @@ _ATTRIBUTE_RENAMES: dict[str, str] = {
     "savingsVsMarketChf": "savings_vs_market_chf",
     "daysOnMarket": "days_on_market",
     "sourcePlatform": "source_platform",
+    "sourcePath": "source_path",
     "dealerName": "dealer_name",
     "firstSeenAt": "first_seen_at",
     "lastUpdatedAt": "last_updated_at",
     "priceHistory": "price_history",
+    "priceChangePercent": "price_change_percent",
+    "estimatedMarketPriceChf": "estimated_market_price_chf",
 }
 
 # Already surfaced as dedicated Listing fields, or metadata with no AI-Q&A value --
-# excluded from the generic catch-all pass below.
+# excluded from the generic catch-all pass below. `modelVariant` becomes part of
+# Listing.title (see listing_from_api_item) rather than a separate attribute, same
+# treatment as Autolina's `adTitle`.
 _SKIP_KEYS = {
-    "id", "name", "description", "make", "model", "url",
+    "id", "name", "description", "make", "model", "modelVariant", "url",
     "price", "priceCurrency", "imageUrl", "imageCaption", "imageUrls",
     "itemCondition", "availability",
     "addressCountry", "addressLocality", "addressRegion", "postalCode",
@@ -126,29 +151,30 @@ def listing_from_api_item(item: dict) -> Listing | None:
     make = (item.get("make") or "").strip()
     model = (item.get("model") or "").strip()
     year = item.get("year")
-    vehicle_title = " ".join(str(p) for p in (make, model, year) if p)
+    model_variant = (item.get("modelVariant") or "").strip()
+    # `modelVariant` (added in autouncle-scraper 0.4.0) is the actual battery/trim code
+    # (e.g. "P90D (Free Supercharging)", "100 D") -- exactly the piece previously
+    # missing that made a trim-specific watch ("Model S90") fail to match a genuinely
+    # matching listing. It's part of the vehicle identity, so it belongs in
+    # vehicle_title itself, not bolted on afterward.
+    vehicle_title = " ".join(str(p) for p in (make, model, model_variant, year) if p)
 
     name = (item.get("name") or "").strip()
-    # `name` is AutoUncle's own auto-generated headline and usually already carries the
-    # full vehicle identity plus trim tier + power (e.g. "Gebraucht 2015 Tesla Model S
-    # Performance 772 PS") -- but as a defensive guarantee (mirroring the same fix
-    # applied to the Autolina adapter), never rely on it alone: fall back to leading
-    # with the structured vehicle_title if `name` is missing or doesn't clearly mention
-    # the make/model, rather than silently losing the vehicle identity.
-    if name and make and model and make.lower() in name.lower() and model.lower() in name.lower():
-        base_title = name
-    else:
-        base_title = " — ".join(p for p in (vehicle_title, name or None) if p)
+    # `name` is AutoUncle's own auto-generated headline (e.g. "Gebraucht 2015 Tesla
+    # Model S Performance 772 PS") and usually already carries the make/model -- but it
+    # does NOT reliably carry `modelVariant`'s exact battery/trim code (it says
+    # "Performance", a rough tier word, not "P90D"), so `name` can never be trusted
+    # alone (same principle as the Autolina fix, one level stricter): always lead with
+    # the structured vehicle_title -- which does carry modelVariant -- and append `name`
+    # afterward for its own extra context, when it's not just a duplicate.
+    base_title = " — ".join(p for p in (vehicle_title, name if name and name != vehicle_title else None) if p)
 
-    # AutoUncle has no field anywhere for Tesla-style battery/trim codes (60/70/75/85/
-    # 90/100D, ...) -- confirmed live, `model` is just "Model S", and `name` only ever
-    # has a rough tier word ("Performance") plus horsepower, never the battery code. So
-    # an exact keyword match on a trim code (e.g. a watch searching "Model S90") can
-    # legitimately fail for a genuinely matching listing -- there's no way to recover
-    # data the site doesn't expose. What we CAN do is surface every other spec fact
-    # that AutoUncle splits across separate fields (power in kW alongside name's PS,
-    # transmission, fuel type) directly in the title, so a listing like this is still
-    # judgable at a glance from the filtered-out list instead of only via a click-through.
+    # `modelVariant` isn't always present (older/thinner listings, or a card this
+    # release's parser couldn't confidently read), and even when present it doesn't
+    # cover every possible watch phrasing -- so still surface every other spec fact
+    # AutoUncle splits across separate fields (power in kW alongside name's PS,
+    # transmission, fuel type) directly in the title, so a listing is judgable at a
+    # glance from the filtered-out list instead of only via a click-through.
     # (bodyType is deliberately excluded -- confirmed unreliable, e.g. a real Model S
     # sedan reported as "Kleinwagen"/subcompact.)
     power_kw = item.get("enginePowerKw")
@@ -176,6 +202,74 @@ def listing_from_api_item(item: dict) -> Listing | None:
     )
 
 
+def _fetch_listings(
+    make: str,
+    model: str,
+    *,
+    price_from: int | None,
+    price_to: int | None,
+    mileage_to: int | None,
+    year_from: int | None,
+    year_to: int | None,
+    max_results: int | None,
+    delay: float,
+    verbose: bool,
+) -> list[dict]:
+    """Search + detail-fetch, merging so search-summary-only fields (``modelVariant``,
+    price rating/change, source platform, ...) survive the detail visit instead of being
+    silently dropped by it -- see the module docstring for why this can't just be
+    ``scrape(detail=True)``."""
+    for lo, hi, name in ((price_from, price_to, "price"), (year_from, year_to, "year")):
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError(f"{name}_from ({lo}) cannot be greater than {name}_to ({hi})")
+
+    session = make_session()
+    config = fetch_search_form_config(DEFAULT_DOMAIN, session=session)
+    make_key = resolve_make_key(make, config)
+    model_key = resolve_model_key(make_key, model, config)
+
+    car_search_input = build_car_search_input(
+        make_key,
+        model_key,
+        price_from=price_from,
+        price_to=price_to,
+        mileage_to=mileage_to,
+        year_from=year_from,
+        year_to=year_to,
+    )
+    domain_cfg = get_domain_config(DEFAULT_DOMAIN)
+    filtered = any(k not in _CAR_SEARCH_INPUT_IDENTITY_KEYS for k in car_search_input)
+
+    if filtered:
+        summaries = search_listings_filtered(
+            make_key, model_key, domain_cfg, car_search_input, session=session, delay=delay, verbose=verbose
+        )
+    else:
+        summaries = search_listings(make_key, model_key, domain_cfg, session=session, delay=delay, verbose=verbose)
+
+    if max_results is not None and len(summaries) > max_results:
+        if verbose:
+            log.info(
+                "AutoUncle.ch: opening only the first %d of %d matching listings (max_results=%d)",
+                max_results,
+                len(summaries),
+                max_results,
+            )
+        summaries = summaries[:max_results]
+
+    by_id = {item["id"]: item for item in summaries if item.get("id")}
+    details = visit_all_listings(list(by_id), domain_cfg=domain_cfg, session=session, delay=delay, verbose=verbose)
+
+    merged = []
+    for detail in details:
+        summary = by_id.get(detail.get("id"), {})
+        # Detail values win wherever both phases set a field; a search-summary-only
+        # field (modelVariant, priceChangePercent, ...) has no key at all in `detail`,
+        # so it survives untouched.
+        merged.append({**summary, **{k: v for k, v in detail.items() if v is not None}})
+    return merged
+
+
 class AutoUncleAdapter(BaseAdapter):
     key = "autouncle"
     label = "AutoUncle.ch"
@@ -190,8 +284,7 @@ class AutoUncleAdapter(BaseAdapter):
         if not make or not model:
             raise AdapterError("AutoUncle.ch requires both Make and Model to be set on the watch")
 
-        scrape_kwargs = dict(
-            detail=True,
+        fetch_kwargs = dict(
             price_from=int(query.price_min) if query.price_min is not None else None,
             price_to=int(query.price_max) if query.price_max is not None else None,
             mileage_to=int(p["mileage_max"]) if p.get("mileage_max") else None,
@@ -203,18 +296,18 @@ class AutoUncleAdapter(BaseAdapter):
         )
 
         try:
-            result = self._scrape_with_model_fallback(make, model, scrape_kwargs)
+            listings = self._fetch_with_model_fallback(make, model, fetch_kwargs)
         except ValueError as exc:  # bad filters / unknown make-model
             raise AdapterError(f"AutoUncle.ch: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 - requests exceptions (incl. stray HTTPError), etc.
             raise AdapterError(f"AutoUncle.ch request failed: {exc}") from exc
 
-        return [li for item in result.listings if (li := listing_from_api_item(item)) is not None]
+        return [li for item in listings if (li := listing_from_api_item(item)) is not None]
 
     @staticmethod
-    def _scrape_with_model_fallback(make: str, model: str, scrape_kwargs: dict[str, Any]):
+    def _fetch_with_model_fallback(make: str, model: str, fetch_kwargs: dict[str, Any]) -> list[dict]:
         try:
-            return scrape(make, model, **scrape_kwargs)
+            return _fetch_listings(make, model, **fetch_kwargs)
         except ValueError as exc:
             corrected = _find_unambiguous_model_match(model, str(exc))
             if corrected is None or corrected.lower() == model.lower():
@@ -224,7 +317,7 @@ class AutoUncleAdapter(BaseAdapter):
                 model,
                 corrected,
             )
-            return scrape(make, corrected, **scrape_kwargs)
+            return _fetch_listings(make, corrected, **fetch_kwargs)
 
     def health_check(self) -> bool:
         try:

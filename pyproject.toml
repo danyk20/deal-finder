@@ -35,15 +35,19 @@ dependencies = [
     # mean "the newest N" (results sorted newest-first by carId descending) rather than
     # an arbitrary site-returned order.
     "autolina-scraper>=0.3.1",
-    # AutoUncle.ch: parses schema.org JSON-LD (unfiltered search + detail pages) plus a
-    # filtered-search RSC/GraphQL path via the autouncle-scraper package -- no browser
-    # needed. AutoUncle marks its listing data CC BY 4.0. Requires Python >=3.13 (see
-    # requires-python above -- this, not just the facebook extra, now needs that floor).
+    # AutoUncle.ch: parses schema.org JSON-LD (unfiltered search) plus a filtered-search
+    # RSC/GraphQL path via the autouncle-scraper package -- no browser needed. AutoUncle
+    # marks its listing data CC BY 4.0. Requires Python >=3.13 (see requires-python above
+    # -- this, not just the facebook extra, now needs that floor).
     # >=0.3.0 required: max_results only caps the detail-fetch phase's *request cost*
     # from that version onward -- 0.1.0 had no cap at all (a single popular model can
     # have 2000+ listings); 0.2.0's cap trimmed the returned set but still fetched every
     # match's detail page first (recency data is itself detail-only on this site).
-    "autouncle-scraper>=0.3.0",
+    # >=0.4.0 adds `modelVariant` (Tesla's actual battery/trim code, e.g. "P90D") as a
+    # search-summary-only field -- the adapter calls the search/detail functions
+    # directly and merges them itself (rather than `scrape()`) specifically to keep this
+    # field, since `scrape(detail=True)` currently discards it (see adapters/autouncle.py).
+    "autouncle-scraper>=0.4.0",
 ]
 
 [project.optional-dependencies]
