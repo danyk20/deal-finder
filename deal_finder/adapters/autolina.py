@@ -130,8 +130,17 @@ def listing_from_api_item(item: dict) -> Listing | None:
 
     make = (item.get("make") or "").strip()
     model_type = (item.get("modelType") or "").strip()
-    fallback_title = " ".join(p for p in (make, model_type) if p).strip()
-    title = (item.get("adTitle") or "").strip() or fallback_title
+    vehicle_title = " ".join(p for p in (make, model_type) if p).strip()
+    ad_title = (item.get("adTitle") or "").strip()
+    # `adTitle` is the seller's own marketing headline (e.g. "FRISCH AB MFK + FRISCH AB
+    # SERVICE + AUS 1 - HAND") and often doesn't mention the make/model at all. It must
+    # never fully replace `vehicle_title` -- the matching engine requires every watch
+    # search term (make, model) to appear somewhere in title+description
+    # (matching.py's filter_rejection_reason), so dropping the vehicle name here caused
+    # genuinely matching listings to be rejected as "search term 'Tesla' not found".
+    # Append the ad headline instead, for the extra human/AI-facing context it usually
+    # carries (mileage/condition claims, etc.), rather than dropping it.
+    title = " — ".join(p for p in (vehicle_title, ad_title if ad_title != vehicle_title else None) if p)
     if not title:
         return None
 
