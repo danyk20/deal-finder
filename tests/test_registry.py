@@ -13,7 +13,7 @@ def test_demo_is_internal_only():
 def test_list_adapters_hides_internal_by_default():
     keys = {a.key for a in registry.list_adapters()}
     assert "demo" not in keys
-    assert {"tutti", "ricardo", "autoscout24", "autolina", "facebook"} <= keys
+    assert {"tutti", "ricardo", "autoscout24", "autolina", "autouncle", "facebook"} <= keys
 
 
 def test_list_adapters_include_internal_shows_demo():

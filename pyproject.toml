@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "deal-finder"
 version = "0.1.0"
 description = "Periodically scan second-hand marketplaces for specific items, enrich with a local LLM, and email matches."
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
@@ -35,13 +35,22 @@ dependencies = [
     # mean "the newest N" (results sorted newest-first by carId descending) rather than
     # an arbitrary site-returned order.
     "autolina-scraper>=0.3.1",
+    # AutoUncle.ch: parses schema.org JSON-LD (unfiltered search + detail pages) plus a
+    # filtered-search RSC/GraphQL path via the autouncle-scraper package -- no browser
+    # needed. AutoUncle marks its listing data CC BY 4.0. Requires Python >=3.13 (see
+    # requires-python above -- this, not just the facebook extra, now needs that floor).
+    # >=0.3.0 required: max_results only caps the detail-fetch phase's *request cost*
+    # from that version onward -- 0.1.0 had no cap at all (a single popular model can
+    # have 2000+ listings); 0.2.0's cap trimmed the returned set but still fetched every
+    # match's detail page first (recency data is itself detail-only on this site).
+    "autouncle-scraper>=0.3.0",
 ]
 
 [project.optional-dependencies]
-# Facebook Marketplace adapter: a separate extra because it pulls in its own dedicated
-# Playwright-based package with its own Python floor (>=3.13), so projects that don't
-# want Facebook scanning (and its ToS/ban risk) can skip it and stay on an older Python.
-# Installed by default via the Pipfile ("facebook" extra).
+# Facebook Marketplace adapter: a separate extra because of its ToS/ban risk, so projects
+# that don't want Facebook scanning can skip it. Installed by default via the Pipfile
+# ("facebook" extra). (Its own Python floor of >=3.13 no longer sets it apart from the
+# rest of the core dependencies -- autouncle-scraper above now needs that floor too.)
 # >=0.2.0 pins playwright==1.60.0 (was ~=1.61), matching ricardo-scraper's exact pin --
 # 0.1.0 conflicted with ricardo-scraper and couldn't be installed alongside it.
 facebook = ["facebook-marketplace-scraper>=0.2.2"]

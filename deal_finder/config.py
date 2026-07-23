@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     adapter_ricardo_enabled: bool = True
     adapter_autoscout24_enabled: bool = True  # plain public JSON API; no browser involved
     adapter_autolina_enabled: bool = True     # plain HTML parsing; no browser involved
+    adapter_autouncle_enabled: bool = True    # schema.org JSON-LD + GraphQL; no browser involved
     adapter_facebook_enabled: bool = True      # user chose on-by-default (ToS/ban risk!)
 
     # --- Facebook credentials (optional auto-login fallback) ---
@@ -97,6 +98,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "adapter_ricardo_enabled",
     "adapter_autoscout24_enabled",
     "adapter_autolina_enabled",
+    "adapter_autouncle_enabled",
     "adapter_facebook_enabled",
     # facebook credentials
     "facebook_email",

@@ -3,10 +3,11 @@
 To add a category or marketplace, import it here and add an instance to the list.
 Everything else in the app discovers them through these functions.
 
-tutti, Ricardo, AutoScout24, Autolina and Facebook are all plain adapters from the
-pipeline's point of view: each wraps a dedicated PyPI package that manages its own access
-internally (tutti and AutoScout24 call genuinely public JSON/GraphQL APIs; Autolina parses
-the site's own server-rendered HTML directly; Ricardo drives its own bundled
+tutti, Ricardo, AutoScout24, Autolina, AutoUncle and Facebook are all plain adapters from
+the pipeline's point of view: each wraps a dedicated PyPI package that manages its own
+access internally (tutti and AutoScout24 call genuinely public JSON/GraphQL APIs; Autolina
+parses the site's own server-rendered HTML directly; AutoUncle parses schema.org JSON-LD
+plus a filtered-search RSC/GraphQL path; Ricardo drives its own bundled
 anti-fingerprinting Camoufox browser to get past Cloudflare; Facebook drives its own
 separate Playwright browser + login flow). None of them need deal_finder's own shared
 browser session. The offline Demo adapter is also plain HTTP (canned data).
@@ -15,6 +16,7 @@ browser session. The offline Demo adapter is also plain HTTP (canned data).
 from __future__ import annotations
 
 from .adapters.autolina import AutolinaAdapter
+from .adapters.autouncle import AutoUncleAdapter
 from .adapters.autoscout24 import AutoScout24Adapter
 from .adapters.base import BaseAdapter
 from .adapters.demo import DemoAdapter
@@ -33,6 +35,7 @@ ADAPTERS: dict[str, BaseAdapter] = {
         RicardoAdapter(),
         AutoScout24Adapter(),
         AutolinaAdapter(),
+        AutoUncleAdapter(),
         FacebookAdapter(),
         DemoAdapter(),
     )

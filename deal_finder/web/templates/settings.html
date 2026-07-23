@@ -101,6 +101,10 @@
       <span class="check-row-main"><input type="checkbox" name="adapter_autolina_enabled" {{ 'checked' if values.adapter_autolina_enabled else '' }}> Autolina.ch</span>
       <small class="check-row-hint">Parses autolina.ch's own listing pages directly, no browser needed.</small>
     </label>
+    <label class="check-row">
+      <span class="check-row-main"><input type="checkbox" name="adapter_autouncle_enabled" {{ 'checked' if values.adapter_autouncle_enabled else '' }}> AutoUncle.ch</span>
+      <small class="check-row-hint">schema.org JSON-LD + GraphQL, no browser needed. Listing data is CC BY 4.0 licensed.</small>
+    </label>
     <label class="check-row"><span class="check-row-main"><input type="checkbox" name="adapter_facebook_enabled" {{ 'checked' if values.adapter_facebook_enabled else '' }}> Facebook Marketplace</span></label>
   </fieldset>
 

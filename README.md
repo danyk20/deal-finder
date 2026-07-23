@@ -8,7 +8,7 @@ listings, translated and pre-analyzed by a **free local AI**.
 ![Ollama](https://img.shields.io/badge/AI-local%20via%20Ollama-black?logo=ollama)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
 
-- **Scans on your schedule** — tutti.ch, Ricardo.ch, AutoScout24.ch, Autolina.ch, Facebook Marketplace.
+- **Scans on your schedule** — tutti.ch, Ricardo.ch, AutoScout24.ch, Autolina.ch, AutoUncle.ch, Facebook Marketplace.
 - **Notifies once per listing** — email or Telegram, deduplicated across marketplaces.
 - **AI-enriched** — translates the description into your chosen language and answers
   your questions (condition, known issues, pickup, …) using [Ollama](https://ollama.com).
@@ -87,6 +87,7 @@ notify you, which marketplaces), then click **Run now**.
 | **Ricardo.ch** | Bundled Camoufox browser via [ricardo-scraper](https://pypi.org/project/ricardo-scraper/) | none | Handles Cloudflare itself, fully self-contained. |
 | **AutoScout24.ch** | Public JSON API via [autoscout24-scraper](https://pypi.org/project/autoscout24-scraper/) | none | Biggest Swiss car inventory; no anti-bot measures at all. |
 | **Autolina.ch** | Server-rendered HTML via [autolina-scraper](https://pypi.org/project/autolina-scraper/) | none | Rich structured spec data (VIN, energy data, equipment, dealer info); free-text description when the seller wrote one. |
+| **AutoUncle.ch** | schema.org JSON-LD + GraphQL via [autouncle-scraper](https://pypi.org/project/autouncle-scraper/) | none | Aggregates listings from other portals too (some overlap with the above, deduplicated automatically); adds AutoUncle's own "fair price" rating and price history. Data is CC BY 4.0 licensed. |
 | **Facebook Marketplace** | Playwright browser via [facebook-marketplace-scraper](https://pypi.org/project/facebook-marketplace-scraper/) | `pipenv run fb-login` once | **Automating Facebook violates its ToS and risks an account ban** — use a dedicated account. |
 | **Demo** | Canned offline listings | none | Try the full pipeline without any network. |
 
