@@ -125,8 +125,36 @@ def listing_from_api_item(item: dict) -> Listing | None:
 
     make = (item.get("make") or "").strip()
     model = (item.get("model") or "").strip()
-    fallback_title = " ".join(p for p in (make, model) if p).strip()
-    title = (item.get("name") or "").strip() or fallback_title
+    year = item.get("year")
+    vehicle_title = " ".join(str(p) for p in (make, model, year) if p)
+
+    name = (item.get("name") or "").strip()
+    # `name` is AutoUncle's own auto-generated headline and usually already carries the
+    # full vehicle identity plus trim tier + power (e.g. "Gebraucht 2015 Tesla Model S
+    # Performance 772 PS") -- but as a defensive guarantee (mirroring the same fix
+    # applied to the Autolina adapter), never rely on it alone: fall back to leading
+    # with the structured vehicle_title if `name` is missing or doesn't clearly mention
+    # the make/model, rather than silently losing the vehicle identity.
+    if name and make and model and make.lower() in name.lower() and model.lower() in name.lower():
+        base_title = name
+    else:
+        base_title = " — ".join(p for p in (vehicle_title, name or None) if p)
+
+    # AutoUncle has no field anywhere for Tesla-style battery/trim codes (60/70/75/85/
+    # 90/100D, ...) -- confirmed live, `model` is just "Model S", and `name` only ever
+    # has a rough tier word ("Performance") plus horsepower, never the battery code. So
+    # an exact keyword match on a trim code (e.g. a watch searching "Model S90") can
+    # legitimately fail for a genuinely matching listing -- there's no way to recover
+    # data the site doesn't expose. What we CAN do is surface every other spec fact
+    # that AutoUncle splits across separate fields (power in kW alongside name's PS,
+    # transmission, fuel type) directly in the title, so a listing like this is still
+    # judgable at a glance from the filtered-out list instead of only via a click-through.
+    # (bodyType is deliberately excluded -- confirmed unreliable, e.g. a real Model S
+    # sedan reported as "Kleinwagen"/subcompact.)
+    power_kw = item.get("enginePowerKw")
+    spec_bits = [f"{power_kw} kW" if power_kw else None, item.get("transmission"), item.get("fuelType")]
+    spec_suffix = ", ".join(b for b in spec_bits if b)
+    title = f"{base_title} ({spec_suffix})" if base_title and spec_suffix else base_title
     if not title:
         return None
 

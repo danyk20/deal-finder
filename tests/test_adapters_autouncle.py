@@ -43,7 +43,7 @@ def test_listing_from_api_item_real_fixture():
     assert li.marketplace == "autouncle"
     assert li.external_id == "7025401"
     assert li.url == "https://www.autouncle.ch/de-ch/d/7025401"
-    assert li.title == "Gebraucht 2022 VW Golf VIII 110 PS"
+    assert li.title == "Gebraucht 2022 VW Golf VIII 110 PS (80 kW, Automatikgetriebe, Elektrisch/Benzin)"
     assert li.description.startswith("Gebraucht VW Golf VIII")
     assert li.price == 12999.0 and li.currency == "CHF"
     assert li.location == "5703 Seon"
@@ -82,6 +82,39 @@ def test_listing_from_api_item_unknown_fields_reach_ai_via_catchall():
     item = {"id": "1", "make": "VW", "model": "Golf VIII", "someNewField": "value"}
     li = listing_from_api_item(item)
     assert li.attributes["someNewField"] == "value"
+
+
+def test_listing_from_api_item_enriches_title_with_split_spec_fields():
+    """Regression (reported issue): AutoUncle's `model` field for Tesla is just "Model
+    S" -- it has no field anywhere for the battery/trim code (e.g. "90D"), only a rough
+    tier word ("Performance") plus horsepower in `name`. Since an exact keyword match on
+    a trim code can legitimately fail for a genuinely matching listing, surface every
+    other spec fact AutoUncle splits across separate fields (kW, transmission, fuel)
+    directly in the title so it's still judgable at a glance."""
+    item = {
+        "id": "1",
+        "make": "Tesla",
+        "model": "Model S",
+        "year": 2015,
+        "name": "Gebraucht 2015 Tesla Model S Performance 772 PS",
+        "enginePowerKw": 568,
+        "transmission": "Automatikgetriebe",
+        "fuelType": "Elektro",
+        "bodyType": "Kleinwagen",  # deliberately excluded from title -- confirmed unreliable
+    }
+    li = listing_from_api_item(item)
+    assert li.title == "Gebraucht 2015 Tesla Model S Performance 772 PS (568 kW, Automatikgetriebe, Elektro)"
+    assert "Kleinwagen" not in li.title
+
+
+def test_listing_from_api_item_title_leads_with_vehicle_identity_when_name_lacks_it():
+    """Regression: mirrors the Autolina fix -- if `name` were ever missing the make/model
+    (defensive; not observed live for AutoUncle, but must not silently lose identity if it
+    happens), the structured vehicle_title must lead instead."""
+    item = {"id": "1", "make": "Tesla", "model": "Model S", "year": 2015, "name": "Top gepflegtes Fahrzeug"}
+    li = listing_from_api_item(item)
+    assert li.title.startswith("Tesla Model S 2015")
+    assert "Top gepflegtes Fahrzeug" in li.title
 
 
 def test_listing_from_api_item_falls_back_to_make_model_title():
