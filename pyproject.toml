@@ -44,10 +44,12 @@ dependencies = [
     # have 2000+ listings); 0.2.0's cap trimmed the returned set but still fetched every
     # match's detail page first (recency data is itself detail-only on this site).
     # >=0.4.0 adds `modelVariant` (Tesla's actual battery/trim code, e.g. "P90D") as a
-    # search-summary-only field -- the adapter calls the search/detail functions
-    # directly and merges them itself (rather than `scrape()`) specifically to keep this
-    # field, since `scrape(detail=True)` currently discards it (see adapters/autouncle.py).
-    "autouncle-scraper>=0.4.0",
+    # search-summary-only field, but that version's own scrape(detail=True) silently
+    # discarded it (detail-page fetch fully replaced the search record instead of
+    # merging). >=0.4.1 fixes this properly upstream: scrape() now fills gaps in each
+    # detail record from its own search-phase record, so plain scrape() keeps
+    # modelVariant regardless of detail=True/False.
+    "autouncle-scraper>=0.4.1",
 ]
 
 [project.optional-dependencies]
