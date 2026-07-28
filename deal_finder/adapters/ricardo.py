@@ -18,33 +18,73 @@ have attributed that number to a "car" that doesn't exist. `ricardo-scraper` alr
 supports this filter (matched against each listing's JSON-LD category breadcrumbs);
 requires `detail=True` (already the case here).
 
-Known limitation, confirmed live rather than assumed: `ricardo-scraper` doesn't expose
-year/mileage/transmission/fuel/color even for genuine cars, so this adapter falls back
-to a regex over title+description (`browser/extract.py`'s `parse_year`/`parse_int_km`,
-shared with other adapters' own unstructured-text fallback) -- which finds nothing for a
-listing whose description is pure feature-bullet text with no year/mileage mentioned in
-words. The real data exists: ricardo.ch's own "Fahrzeug-Klassierung" characteristics
-panel (year, mileage, transmission, color, fuel, ...) lives in
+`ricardo-scraper` >=0.2.1 fixed the year/mileage gap: ricardo.ch's own "Fahrzeug-Klassierung"
+characteristics panel (year, mileage, transmission, color, fuel, ...) lives in
 `__NEXT_DATA__.props.pageProps.article.attributes` -- a clean `{label, key, values}`
-list the package's own `extract_next_data()` already fetches as part of every detail
-visit, but its `_extract_extra_fields()` never reads. Until that's exposed upstream (or
-this adapter reimplements the detail-visit loop itself instead of using the package's
-`visit_all_listings()`, which currently discards it), year/mileage stay regex-derived
-and can be missing or wrong for listings whose description doesn't restate them in text.
+list the package's `extract_next_data()` already fetches on every detail visit, but its
+`_extract_extra_fields()` used to never read. Confirmed live (0.2.1): each listing dict
+now carries a flattened `attributes` dict (e.g. ``{"auto_first_registration_year":
+"2018", "auto_mileage": "93'500 km", "auto_gear_type": "Automat", "car_fuel_type":
+"Elektrisch", "vehicle_classification": "Standard", ...}``), plus top-level `color`/
+`model` fields the JSON-LD always had but weren't being extracted either. This is now
+the primary source for year/mileage/transmission/fuel/color/classification --
+structured, not guessed from free text. The regex-over-title+description fallback
+(`browser/extract.py`'s `parse_year`/`parse_int_km`) stays as a safety net for whatever
+`attributes` doesn't cover for a given listing, rather than being removed outright.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from typing import Any
 
 from ricardo_scraper import scrape
 
-from ..browser import extract as ex  # shared parse_year / parse_int_km
+from ..browser import extract as ex  # shared parse_year / parse_int_km fallback
 from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.ricardo")
+
+# ricardo-scraper's own structured `attributes` keys (car-category specific, confirmed
+# live) renamed to the naming convention used by the other adapters' `attributes`.
+# car_brand/car_model/color are skipped -- already surfaced via the listing's own
+# dedicated `brand`/`model`/`color` fields (see below), no need to duplicate them here.
+_ATTRIBUTE_RENAMES: dict[str, str] = {
+    "auto_gear_type": "transmission",
+    "car_fuel_type": "fuel",
+    "vehicle_classification": "classification",
+}
+_ATTRIBUTE_SKIP_KEYS = {"car_brand", "car_model", "color", "auto_first_registration_year", "auto_mileage"}
+
+
+def _build_attributes(node: dict, text_blob: str) -> dict[str, Any]:
+    """Structured `attributes` (added in ricardo-scraper 0.2.1) is the primary source;
+    the regex-over-text fallback only fills in year/mileage when that structured data
+    doesn't have them, rather than being dropped now that a better source exists."""
+    attrs: dict[str, Any] = {}
+    raw_attrs = node.get("attributes") or {}
+
+    year_str = raw_attrs.get("auto_first_registration_year")
+    year = int(year_str) if isinstance(year_str, str) and year_str.isdigit() else ex.parse_year(text_blob)
+    if year is not None:
+        attrs["year"] = year
+
+    mileage = ex.parse_int_km(raw_attrs.get("auto_mileage") or "") or ex.parse_int_km(text_blob)
+    if mileage is not None:
+        attrs["mileage_km"] = mileage
+
+    for key, value in raw_attrs.items():
+        if key in _ATTRIBUTE_SKIP_KEYS or not value:
+            continue
+        attrs[_ATTRIBUTE_RENAMES.get(key, key)] = value
+
+    color = node.get("color")
+    if color:
+        attrs["color"] = color
+
+    return attrs
 
 
 def listing_from_api_node(node: dict) -> Listing | None:
@@ -56,17 +96,8 @@ def listing_from_api_node(node: dict) -> Listing | None:
         return None
 
     description = (node.get("description") or "").strip()
-    # ricardo-scraper doesn't expose structured year/mileage fields (only tutti's API
-    # does) -- fall back to regex over the title+description, same as deal_finder's own
-    # extract.py fallback used for every other adapter's unstructured text.
     text_blob = f"{title}\n{description}"
-    attrs: dict[str, int] = {}
-    year = ex.parse_year(text_blob)
-    if year is not None:
-        attrs["year"] = year
-    mileage = ex.parse_int_km(text_blob)
-    if mileage is not None:
-        attrs["mileage_km"] = mileage
+    attrs = _build_attributes(node, text_blob)
 
     location = ", ".join(p for p in (node.get("location_zip"), node.get("location_city")) if p) or None
 

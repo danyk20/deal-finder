@@ -26,7 +26,12 @@ dependencies = [
     # Ricardo.ch: drives its own bundled, anti-fingerprinting Camoufox browser to get
     # past Cloudflare's Managed Challenge — self-contained, no shared deal_finder
     # browser session/profile needed for this adapter anymore.
-    "ricardo-scraper>=0.2.0",
+    # >=0.2.1 exposes the site's own "Fahrzeug-Klassierung" characteristics panel
+    # (year/mileage/transmission/fuel/color/classification) as a structured `attributes`
+    # dict per listing, plus top-level `color`/`model` fields -- all previously fetched
+    # internally (as part of the __NEXT_DATA__ blob every detail visit already pulls)
+    # but silently discarded before reaching callers.
+    "ricardo-scraper>=0.2.1",
     # Autolina.ch: parses the site's server-rendered HTML directly (autolina.ch) via the
     # autolina-scraper package — mirrors autoscout24-scraper's design/signatures, but no
     # public JSON API is involved; plain requests, no browser needed for this adapter.

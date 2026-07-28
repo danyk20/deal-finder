@@ -27,7 +27,63 @@ def _result(listings):
 # --- pure field mapping ------------------------------------------------------
 
 
-def test_listing_from_api_node_maps_year_and_mileage_from_text():
+def test_listing_from_api_node_uses_structured_attributes():
+    """Regression (originally reported issue, fixed in ricardo-scraper >=0.2.1): real
+    car listings used to show up with no year/mileage at all, since ricardo-scraper
+    didn't expose the site's own "Fahrzeug-Klassierung" characteristics panel and the
+    text-regex fallback found nothing in a pure feature-bullet description. Confirmed
+    live against the exact reported listing (tesla-model-x-100d-1324931008): the
+    structured `attributes` dict is now the primary, reliable source."""
+    node = {
+        "id": "1324931008",
+        "title": "TESLA Model X 100D",
+        "description": "Neupreis130000.611PS, 4x4 Allrad, Sommer und Winterrader 20,"
+        "Anhanger-Kupplung, Falcon Flugelturen, sehr grosser Stauraum.",  # no year/km in text
+        "price": 32000,
+        "brand": "Tesla",
+        "model": "Model X",
+        "color": "Weiss",
+        "attributes": {
+            "auto_first_registration_year": "2018",
+            "vehicle_classification": "Standard",
+            "color": "Weiss",
+            "auto_gear_type": "Automat",
+            "auto_mileage": "93'500 km",
+            "car_brand": "Tesla",
+            "car_model": "Model X",
+            "car_fuel_type": "Elektrisch",
+        },
+    }
+    li = listing_from_api_node(node)
+    assert li.attributes["year"] == 2018
+    assert li.attributes["mileage_km"] == 93500
+    assert li.attributes["transmission"] == "Automat"
+    assert li.attributes["fuel"] == "Elektrisch"
+    assert li.attributes["classification"] == "Standard"
+    assert li.attributes["color"] == "Weiss"
+
+
+def test_listing_from_api_node_skips_redundant_attribute_keys():
+    """car_brand/car_model/color inside `attributes` duplicate the listing's own
+    dedicated brand/model/color fields -- must not also appear (renamed or verbatim)
+    in Listing.attributes a second time."""
+    node = {
+        "id": "1",
+        "title": "Tesla Model X",
+        "brand": "Tesla",
+        "model": "Model X",
+        "color": "Weiss",
+        "attributes": {"car_brand": "Tesla", "car_model": "Model X", "color": "Weiss"},
+    }
+    li = listing_from_api_node(node)
+    assert "car_brand" not in li.attributes and "car_model" not in li.attributes
+    assert li.attributes["color"] == "Weiss"  # from the top-level field, not duplicated
+
+
+def test_listing_from_api_node_falls_back_to_text_regex_without_attributes():
+    """When `attributes` is absent/empty (e.g. a listing category ricardo-scraper
+    doesn't have a schema for yet), year/mileage must still fall back to the
+    regex-over-text safety net rather than disappearing entirely."""
     node = {
         "id": "1",
         "title": "TESLA Model X 100D Baujahr 2018",
@@ -45,14 +101,9 @@ def test_listing_from_api_node_maps_year_and_mileage_from_text():
     assert li.location == "8952, Schlieren"
 
 
-def test_listing_from_api_node_no_year_or_mileage_in_text():
-    """Regression (reported issue): ricardo-scraper doesn't expose the site's own
-    structured "Fahrzeug-Klassierung" panel (year/mileage/transmission/etc, confirmed
-    live to live under __NEXT_DATA__'s article.attributes, which the package's
-    _extract_extra_fields() doesn't read) -- deal_finder falls back to regex over
-    title+description, which finds nothing when neither mentions year/mileage in text,
-    even though the real ad page shows both. Documents the current (known-limited)
-    behavior rather than silently producing wrong data."""
+def test_listing_from_api_node_no_year_or_mileage_anywhere():
+    """No structured attributes and no year/mileage mentioned in text either -- must
+    degrade cleanly (no attribute set) rather than raising or guessing."""
     node = {
         "id": "1",
         "title": "TESLA Model X 100D",
