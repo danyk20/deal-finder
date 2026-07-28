@@ -7,6 +7,30 @@ Challenge on ricardo.ch.
 Self-contained: no shared deal_finder browser session, persistent profile, or manual
 "solve the challenge once" step needed for this adapter anymore -- the package handles
 its own browser lifecycle internally, one call to scrape() at a time.
+
+``category="autos"`` matters more than it looks: Ricardo is a general marketplace, not
+car-specific, so a free-text search for a make/model also surfaces non-car listings that
+merely mention it -- confirmed live, a real "Tesla Model X" search returned a wheel/rim
+set (Ricardo category "fahrzeugzubehoer", vehicle accessories) and a charger, alongside
+actual cars. The rim listing's own "5000 km" was the *wheels'* wear, not a car's mileage
+-- if it hadn't been filtered out by category, the naive year/mileage regex below would
+have attributed that number to a "car" that doesn't exist. `ricardo-scraper` already
+supports this filter (matched against each listing's JSON-LD category breadcrumbs);
+requires `detail=True` (already the case here).
+
+Known limitation, confirmed live rather than assumed: `ricardo-scraper` doesn't expose
+year/mileage/transmission/fuel/color even for genuine cars, so this adapter falls back
+to a regex over title+description (`browser/extract.py`'s `parse_year`/`parse_int_km`,
+shared with other adapters' own unstructured-text fallback) -- which finds nothing for a
+listing whose description is pure feature-bullet text with no year/mileage mentioned in
+words. The real data exists: ricardo.ch's own "Fahrzeug-Klassierung" characteristics
+panel (year, mileage, transmission, color, fuel, ...) lives in
+`__NEXT_DATA__.props.pageProps.article.attributes` -- a clean `{label, key, values}`
+list the package's own `extract_next_data()` already fetches as part of every detail
+visit, but its `_extract_extra_fields()` never reads. Until that's exposed upstream (or
+this adapter reimplements the detail-visit loop itself instead of using the package's
+`visit_all_listings()`, which currently discards it), year/mileage stay regex-derived
+and can be missing or wrong for listings whose description doesn't restate them in text.
 """
 
 from __future__ import annotations
@@ -78,6 +102,7 @@ class RicardoAdapter(BaseAdapter):
                 text,
                 locale="de",
                 detail=True,
+                category="autos",
                 max_results=settings.browser_max_items_per_run,
                 price_from=query.price_min,
                 price_to=query.price_max,
