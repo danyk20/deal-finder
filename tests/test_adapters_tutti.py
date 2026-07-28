@@ -15,7 +15,7 @@ import pytest
 
 from deal_finder.adapters import tutti as tutti_mod
 from deal_finder.adapters.base import AdapterError, MarketplaceQuery
-from deal_finder.adapters.tutti import TuttiAdapter, listing_from_api_node
+from deal_finder.adapters.tutti import TuttiAdapter, _build_attributes, listing_from_api_node
 from deal_finder.config import Settings
 
 _NODES = json.loads((Path(__file__).parent / "fixtures" / "tutti_listings.json").read_text())
@@ -42,6 +42,38 @@ def test_listing_from_api_node_real_fixture():
     assert li.attributes["mileage_km"] > 10000
     assert li.location and li.image_urls
     assert li.language  # de/fr/it -> AI translation will run
+
+
+def test_listing_from_api_node_surfaces_previously_dropped_properties():
+    """Regression (reported issue): tutti's own `properties` already carried brand,
+    model, body type, doors, color, fuel type, transmission, and horsepower on every
+    real listing (confirmed via the fixture) -- only year/mileage ever reached
+    `Listing.attributes`. The other six were silently dropped despite being fetched."""
+    li = listing_from_api_node(_NODES[0])
+    assert li.attributes["brand"] == "TESLA"
+    assert li.attributes["model"] == "MODEL S"
+    assert li.attributes["body_type"] == "Limousine"
+    assert li.attributes["color"] == "Rot"
+    assert li.attributes["fuel"] == "Elektro"
+    assert li.attributes["transmission"] == "Automatik"
+    # doors/horsepower come through as real ints, not the raw text
+    assert li.attributes["doors"] == 5 and isinstance(li.attributes["doors"], int)
+    assert li.attributes["horsepower"] == 525 and isinstance(li.attributes["horsepower"], int)
+
+
+def test_build_attributes_unknown_property_reaches_ai_via_catchall():
+    """A property id not in the explicit rename table (e.g. one tutti adds later, or a
+    category-specific one this adapter doesn't know about yet) must still reach the AI
+    verbatim under its own raw key, instead of being silently dropped."""
+    props = {"cars_someBrandNewField": "value"}
+    attrs = _build_attributes(props, title="Tesla Model S", body="")
+    assert attrs["cars_someBrandNewField"] == "value"
+
+
+def test_build_attributes_empty_property_values_skipped():
+    props = {"cars_carAutoScoutColor": "", "cars_carAutoScoutDoors": None}
+    attrs = _build_attributes(props, title="Tesla Model S", body="")
+    assert "color" not in attrs and "doors" not in attrs
 
 
 def test_listing_from_api_node_prefers_structured_mileage():
