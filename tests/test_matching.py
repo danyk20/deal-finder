@@ -87,11 +87,13 @@ def test_keyword_include_exclude():
     assert not passes_filters(_listing(description="Allrad aber Unfall"), q, CAT, w)  # has exclude
 
 
-def test_location_filter():
-    w = _watch(filters={"location": "Genève"})
+def test_location_is_not_text_matched():
+    """Location/radius is only used by adapters that can search around a place; the generic
+    filter never rejects a listing for not naming the watch's city in its text."""
+    w = _watch(filters={"location": "Zurich "})
     q = CAT.build_query(w)
-    assert not passes_filters(_listing(location="Zürich", description="x"), q, CAT, w)
-    assert passes_filters(_listing(location="Genève", description="x"), q, CAT, w)
+    assert passes_filters(_listing(location="Dietikon, ZH", description="x"), q, CAT, w)
+    assert passes_filters(_listing(location="Zürich, ZH", description="x"), q, CAT, w)
 
 
 def test_non_negotiables_skipped_when_blank():

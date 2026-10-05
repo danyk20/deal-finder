@@ -68,12 +68,10 @@ def filter_rejection_reason(
         if _contains(kw.lower(), text):
             return f"excluded keyword '{kw}' found in the listing's title/description"
 
-    # Location (lenient substring match against location field or full text).
-    if query.location:
-        loc = (listing.location or "").lower()
-        needle = query.location.lower()
-        if not _contains(needle, loc) and not _contains(needle, text):
-            return f"location '{query.location}' not found in the listing's location/text"
+    # No location check here on purpose: a watch's location/radius is applied only by
+    # adapters whose marketplace can search around a place (Facebook's city search) and
+    # ignored by the rest. A text match can't express a radius ("Zurich" never matches
+    # Dietikon, or even "Zürich").
 
     category_reason = category.post_match_reason(listing, watch)
     if category_reason is not None:
