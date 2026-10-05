@@ -26,9 +26,9 @@ _SYSTEM = (
     "'FAIL: <short reason>' if it clearly does not."
 )
 
-# Bounds the vision payload/cost per listing -- a car listing rarely needs more than a
-# couple of photos to judge colour/visible condition.
-_MAX_IMAGES = 3
+# Bounds the vision payload/cost per listing -- high enough to cover a typical listing's
+# full gallery (damage/rust often only shows in the later close-up photos).
+_MAX_IMAGES = 30
 
 # Ollama's OpenAI-compatible endpoint rejects remote image_url values outright
 # ("image URLs are not currently supported, please use base64 encoded data instead") --
