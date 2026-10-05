@@ -107,9 +107,14 @@ class FacebookAdapter(BaseAdapter):
         try:
             from fb_scraper.browser import FacebookSession, LoginFailedError
             from fb_scraper.scraper import (
+                CityNotFoundError,
                 LoginRequiredError,
                 MarketplaceConsentRequiredError,
-                search_listings,
+                PlaywrightError,
+                SearchRadiusError,
+                search_all_listings,
+                lookup_city,
+                set_account_search_radius,
                 visit_all_listings,
             )
         except ImportError as exc:
@@ -124,7 +129,7 @@ class FacebookAdapter(BaseAdapter):
         # health_check() below) working without needing to pass one in, but it will
         # never see credentials saved only via the Settings page.
         settings = settings or get_settings()
-        p = query.params or {}
+        city = (query.location or "").strip()
 
         try:
             with FacebookSession(
@@ -134,24 +139,62 @@ class FacebookAdapter(BaseAdapter):
             ) as context:
                 page = context.new_page()
                 try:
-                    candidates = search_listings(
+                    # The watch's city goes into the search URL as a Facebook location id
+                    # (looked up via Marketplace's own location search; doesn't touch the
+                    # account). Without one the search anchors on Zurich.
+                    location = None
+                    if city.isdigit():
+                        location = city  # already a Facebook location id
+                    elif city:
+                        location, _place = lookup_city(page, city, "ch")
+                    # The radius is different: Facebook ignores any radius in the URL and
+                    # only honours the one saved on the account, so a watch radius CHANGES
+                    # the user's real Marketplace setting (and it stays changed after the
+                    # run). Any number works: the scraper (0.4.1+) rounds it up to a radius
+                    # Facebook offers (30 -> 40 km, above 500 -> 500). No watch radius -> the
+                    # account setting is left alone.
+                    radius = query.radius_km
+                    if radius is not None and radius > 0:
+                        try:
+                            set_account_search_radius(page, radius, text, "ch", verbose=False, location=location)
+                        except (SearchRadiusError, PlaywrightError) as exc:
+                            # Same fallback as fb_scraper.scrape(): search anyway, with the
+                            # account's current radius, rather than failing the whole run.
+                            log.warning(
+                                "Facebook: couldn't set the search radius to %d km (%s); searching with "
+                                "the account's current radius instead.",
+                                radius, str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
+                            )
+                    # No year/mileage here (removed in 0.4.0): Facebook applies them only to
+                    # listings with structured vehicle data and silently drops the rest (e.g.
+                    # a 2017 Model X whose year is only in its title). They're enforced after
+                    # the detail fetch instead, by CarCategory.post_match_reason() on the
+                    # year/km parsed from title + description. search_all_listings re-searches
+                    # in price halves when Facebook cuts a big result set off early.
+                    candidates = search_all_listings(
                         page,
                         text,
                         country="ch",
                         min_price=int(query.price_min) if query.price_min is not None else None,
                         max_price=int(query.price_max) if query.price_max is not None else None,
-                        max_mileage=int(p["mileage_max"]) if p.get("mileage_max") else None,
-                        min_year=int(p["year_min"]) if p.get("year_min") else None,
-                        max_year=int(p["year_max"]) if p.get("year_max") else None,
+                        location=location,
                         verbose=False,
                     )
                     # Facebook's radius search can spill just over the border.
                     candidates = [c for c in candidates if c.get("is_local", True)]
                     # Cap the (slower, one-request-per-listing) detail phase.
                     capped = candidates[: settings.browser_max_items_per_run]
-                    detailed = visit_all_listings(page, capped, verbose=False)
+                    # fetch_seller_listings (0.3.0+, on by default) clicks into each seller's
+                    # "other listings" dialog -- extra navigation per listing (slower, more ban
+                    # risk) for seller_listing_* fields we don't use.
+                    detailed = visit_all_listings(page, capped, verbose=False, fetch_seller_listings=False)
                 finally:
                     page.close()
+        except CityNotFoundError as exc:
+            raise AdapterError(
+                f"Facebook Marketplace: couldn't find the location '{city}' in Switzerland ({exc}). "
+                "Try another spelling or a nearby town."
+            ) from exc
         except (LoginRequiredError, MarketplaceConsentRequiredError, LoginFailedError) as exc:
             raise AdapterError(
                 f"Facebook Marketplace: {exc} Run `python -m deal_finder.browser.fb_login` to log in once."

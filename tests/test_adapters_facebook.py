@@ -2,7 +2,7 @@
 
 The adapter lazily imports `fb_scraper` (an optional extra — the [facebook] extra in
 pyproject.toml) inside search(), so these tests monkeypatch the third-party package's
-own objects (fb_scraper.browser.FacebookSession, fb_scraper.scraper.search_listings /
+own objects (fb_scraper.browser.FacebookSession, fb_scraper.scraper.search_all_listings /
 visit_all_listings) rather than names on our module. Skipped entirely if the extra
 isn't installed.
 """
@@ -121,9 +121,18 @@ def _install_fake(monkeypatch, *, search_result=None, visit_result=None, search_
     def fake_visit_all_listings(page, listings, **kwargs):
         return visit_result if visit_result is not None else listings
 
-    monkeypatch.setattr(fb_scraper_mod, "search_listings", fake_search_listings)
+    monkeypatch.setattr(fb_scraper_mod, "search_all_listings", fake_search_listings)
     monkeypatch.setattr(fb_scraper_mod, "visit_all_listings", fake_visit_all_listings)
+    # Never let a test reach the real account-radius dialog.
+    radius_calls.clear()
+    monkeypatch.setattr(
+        fb_scraper_mod, "set_account_search_radius",
+        lambda page, radius_km, query, country="ch", **kw: radius_calls.append((radius_km, kw.get("location"))),
+    )
     return fb_scraper_mod
+
+
+radius_calls: list = []
 
 
 def test_search_requires_text():
@@ -154,7 +163,7 @@ def test_search_filters_non_local(monkeypatch):
     import fb_scraper.scraper as fb_scraper_mod
 
     monkeypatch.setattr(fb_browser, "FacebookSession", _FakeSession)
-    monkeypatch.setattr(fb_scraper_mod, "search_listings", lambda page, q, **k: [local, foreign])
+    monkeypatch.setattr(fb_scraper_mod, "search_all_listings", lambda page, q, **k: [local, foreign])
     monkeypatch.setattr(fb_scraper_mod, "visit_all_listings", fake_visit_all)
 
     list(FacebookAdapter().search(_query()))
@@ -173,7 +182,7 @@ def test_search_caps_detail_fetch(monkeypatch):
     import fb_scraper.scraper as fb_scraper_mod
 
     monkeypatch.setattr(fb_browser, "FacebookSession", _FakeSession)
-    monkeypatch.setattr(fb_scraper_mod, "search_listings", lambda page, q, **k: candidates)
+    monkeypatch.setattr(fb_scraper_mod, "search_all_listings", lambda page, q, **k: candidates)
     monkeypatch.setattr(fb_scraper_mod, "visit_all_listings", fake_visit_all)
     monkeypatch.setattr(
         "deal_finder.adapters.facebook.get_settings", lambda: Settings(browser_max_items_per_run=5)
@@ -246,3 +255,117 @@ def test_health_check(monkeypatch):
 
     _install_fake(monkeypatch, search_raises=RuntimeError("boom"))
     assert FacebookAdapter().health_check() is False
+
+
+def test_search_never_sends_year_or_mileage(monkeypatch):
+    """fb-scraper 0.4.0 dropped year/mileage search filters: Facebook silently drops every
+    listing without structured vehicle data. They're enforced after the detail fetch."""
+    fb_scraper_mod = _install_fake(monkeypatch)
+    seen: dict = {}
+
+    def fake_search_all(page, q, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(fb_scraper_mod, "search_all_listings", fake_search_all)
+    q = MarketplaceQuery(
+        category="car", terms=["Tesla", "Model X"], price_min=2222, price_max=16500,
+        params={"year_min": 2015, "year_max": 2017, "mileage_max": 150000},
+    )
+    list(FacebookAdapter().search(q, Settings()))
+    assert seen["min_price"] == 2222 and seen["max_price"] == 16500
+    assert not {"min_year", "max_year", "min_mileage", "max_mileage"} & seen.keys()
+
+
+def _capture_search(monkeypatch, fb_scraper_mod) -> dict:
+    seen: dict = {}
+
+    def fake_search_all(page, q, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(fb_scraper_mod, "search_all_listings", fake_search_all)
+    return seen
+
+
+def test_search_uses_watch_city(monkeypatch):
+    """The watch's city is looked up (whitespace-trimmed) and its Facebook location id
+    goes into the search; the radius is never sent."""
+    fb_scraper_mod = _install_fake(monkeypatch)
+    looked_up: list = []
+
+    def fake_lookup_city(page, city, country="ch"):
+        looked_up.append((city, country))
+        return "106015269434234", "Zürich, Switzerland"
+
+    monkeypatch.setattr(fb_scraper_mod, "lookup_city", fake_lookup_city)
+    seen = _capture_search(monkeypatch, fb_scraper_mod)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], location="Zurich ", radius_km=30)
+    list(FacebookAdapter().search(q, Settings()))
+    assert looked_up == [("Zurich", "ch")]
+    assert seen["location"] == "106015269434234"
+    assert "radius_km" not in seen and "radius" not in seen  # radius is an account setting, not a search arg
+
+
+def test_search_without_city_uses_default_anchor(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+    monkeypatch.setattr(fb_scraper_mod, "lookup_city", lambda *a, **k: pytest.fail("no city to look up"))
+    seen = _capture_search(monkeypatch, fb_scraper_mod)
+    list(FacebookAdapter().search(_query(), Settings()))
+    assert seen["location"] is None
+
+
+def test_search_numeric_location_id_used_as_is(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+    monkeypatch.setattr(fb_scraper_mod, "lookup_city", lambda *a, **k: pytest.fail("id needs no lookup"))
+    seen = _capture_search(monkeypatch, fb_scraper_mod)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], location="110868505604715")
+    list(FacebookAdapter().search(q, Settings()))
+    assert seen["location"] == "110868505604715"
+
+
+def test_unknown_city_raises_adapter_error(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+
+    def fake_lookup_city(page, city, country="ch"):
+        raise fb_scraper_mod.CityNotFoundError("no suggestion inside 'ch'")
+
+    monkeypatch.setattr(fb_scraper_mod, "lookup_city", fake_lookup_city)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], location="Atlantis")
+    with pytest.raises(AdapterError, match="couldn't find the location 'Atlantis'"):
+        list(FacebookAdapter().search(q, Settings()))
+
+
+def test_watch_radius_sets_account_radius_around_city(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+    monkeypatch.setattr(fb_scraper_mod, "lookup_city", lambda page, city, country="ch": ("103767472995143", "Schlieren"))
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], location="Zurich", radius_km=30)
+    list(FacebookAdapter().search(q, Settings()))
+    assert radius_calls == [(30, "103767472995143")]  # passed as-is; the scraper rounds it
+
+
+@pytest.mark.parametrize("radius_km", [0, -5])
+def test_non_positive_radius_leaves_account_alone(monkeypatch, radius_km):
+    _install_fake(monkeypatch)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], radius_km=radius_km)
+    list(FacebookAdapter().search(q, Settings()))
+    assert radius_calls == []
+
+
+def test_no_watch_radius_leaves_account_alone(monkeypatch):
+    _install_fake(monkeypatch)
+    list(FacebookAdapter().search(_query(), Settings()))
+    assert radius_calls == []
+
+
+def test_radius_change_failure_still_searches(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+
+    def fail(*a, **k):
+        raise fb_scraper_mod.SearchRadiusError("dialog didn't offer 40 km")
+
+    monkeypatch.setattr(fb_scraper_mod, "set_account_search_radius", fail)
+    seen = _capture_search(monkeypatch, fb_scraper_mod)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], radius_km=30)
+    assert list(FacebookAdapter().search(q, Settings())) == []
+    assert "min_price" in seen  # the search still ran
