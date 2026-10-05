@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from deal_finder.adapters.base import Listing
 from deal_finder.ai import enrich_listing
@@ -166,25 +167,77 @@ class FakeImageResponse:
             raise httpx.HTTPStatusError("error", request=None, response=self)
 
 
-def test_check_non_negotiables_includes_photos_as_base64_data_uris(monkeypatch):
+def _photos(monkeypatch, n):
+    fetched = []
+
+    def fake_get(url, **kw):
+        fetched.append(url)
+        return FakeImageResponse()
+
+    monkeypatch.setattr("deal_finder.ai.dealbreakers.httpx.get", fake_get)
+    listing = _listing_with_attributes()
+    listing.image_urls = [f"https://x/photo{i}.jpg" for i in range(1, n + 1)]
+    return listing, fetched
+
+
+def _image_parts(message):
+    content = message[1]["content"]
+    return [] if isinstance(content, str) else [p for p in content if p.get("type") == "image_url"]
+
+
+def test_check_non_negotiables_decides_from_text_alone_without_photos(monkeypatch):
+    """The regression: a listing saying "8 GB RAM" passed "more than 32 GB of RAM", because
+    sending all its photos made the model time out (-> fail open) or ignore the text. The
+    text is judged first, and photos aren't even downloaded when it settles the question."""
+    listing, fetched = _photos(monkeypatch, 5)
+    client = StubClient(["FAIL: only 8 GB of RAM"])
+    passed, reason = check_non_negotiables(client, listing, "Must have more than 32 GB of RAM")
+    assert (passed, reason) == (False, "only 8 GB of RAM")
+    assert client.calls == 1 and not _image_parts(client.messages[0]) and fetched == []
+    assert "mileage_km: 95000" in client.messages[0][1]["content"]
+    assert "Must have more than 32 GB of RAM" in client.messages[0][1]["content"]
+
+
+def test_check_non_negotiables_text_pass_skips_photos(monkeypatch):
+    listing, fetched = _photos(monkeypatch, 5)
+    client = StubClient(["PASS"])
+    assert check_non_negotiables(client, listing, "must be electric") == (True, None)
+    assert client.calls == 1 and fetched == []
+
+
+def test_check_non_negotiables_unknown_looks_at_photos_in_batches_of_3(monkeypatch):
     """Ollama's OpenAI-compatible endpoint rejects remote image_url values outright, so
     every photo must be fetched and inlined as a base64 data: URI -- not passed through
-    as the marketplace's original URL."""
-    monkeypatch.setattr(
-        "deal_finder.ai.dealbreakers.httpx.get",
-        lambda url, **kw: FakeImageResponse(),
-    )
-    listing = _listing_with_attributes()
-    listing.image_urls = ["https://x/photo1.jpg", "https://x/photo2.jpg"]
-    client = StubClient(["PASS"])
-    check_non_negotiables(client, listing, "must be green")
-    content = client.messages[0][1]["content"]  # user message content
-    image_parts = [p for p in content if p.get("type") == "image_url"]
-    assert len(image_parts) == 2
-    assert image_parts[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
-    text_part = next(p for p in content if p.get("type") == "text")
-    assert "mileage_km: 95000" in text_part["text"]
-    assert "must be green" in text_part["text"]
+    as the marketplace's original URL. A few per call: 5 at once confused the model."""
+    listing, fetched = _photos(monkeypatch, 7)
+    client = StubClient(["UNKNOWN: the colour isn't stated", "UNKNOWN", "FAIL: the car is red"])
+    assert check_non_negotiables(client, listing, "must be green") == (False, "the car is red")
+    assert [len(_image_parts(m)) for m in client.messages] == [0, 3, 3]  # stopped before the 7th
+    assert fetched == [f"https://x/photo{i}.jpg" for i in range(1, 7)]
+    photo_call = client.messages[1][1]["content"]
+    assert _image_parts(client.messages[1])[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    text = next(p for p in photo_call if p.get("type") == "text")["text"]
+    assert "must be green" in text and "NOT SETTLED BY THE TEXT: the colour isn't stated" in text
+
+
+def test_check_non_negotiables_photos_can_confirm(monkeypatch):
+    listing, _ = _photos(monkeypatch, 4)
+    client = StubClient(["UNKNOWN: colour", "PASS"])
+    assert check_non_negotiables(client, listing, "must be green") == (True, None)
+    assert client.calls == 2
+
+
+def test_check_non_negotiables_unknown_everywhere_gets_the_benefit_of_the_doubt(monkeypatch):
+    listing, _ = _photos(monkeypatch, 4)
+    client = StubClient(["UNKNOWN: colour", "UNKNOWN", "UNKNOWN"])
+    assert check_non_negotiables(client, listing, "must be green") == (True, None)
+    assert client.calls == 3
+
+
+def test_check_non_negotiables_unknown_without_photos_passes():
+    client = StubClient(["UNKNOWN: colour"])
+    assert check_non_negotiables(client, _listing(), "must be green") == (True, None)
+    assert client.calls == 1
 
 
 def test_check_non_negotiables_skips_unfetchable_photo(monkeypatch):
@@ -195,11 +248,36 @@ def test_check_non_negotiables_skips_unfetchable_photo(monkeypatch):
     )
     listing = _listing_with_attributes()
     listing.image_urls = ["https://x/broken.jpg"]
-    client = StubClient(["PASS"])
+    client = StubClient(["UNKNOWN: colour"])
     passed, reason = check_non_negotiables(client, listing, "must be green")
     assert passed is True
-    content = client.messages[0][1]["content"]
-    assert not [p for p in content if p.get("type") == "image_url"]
+    assert client.calls == 1  # no photo call with zero photos
+
+
+@pytest.mark.parametrize(
+    "answer, expected",
+    [
+        ("**FAIL**: only 8 GB of RAM", (False, "only 8 GB of RAM")),
+        ("Verdict: FAIL: only 8 GB of RAM", (False, "only 8 GB of RAM")),
+        ("fail - only 8 GB", (False, "- only 8 GB")),
+        ("**PASS**", (True, None)),
+        ("", (True, None)),  # unreadable -> logged, fails open (not a silent PASS verdict)
+    ],
+)
+def test_check_non_negotiables_reads_verdict_robustly(answer, expected):
+    assert check_non_negotiables(StubClient([answer]), _listing(), "more than 32 GB of RAM") == expected
+
+
+def test_check_non_negotiables_asks_without_reasoning():
+    seen = {}
+
+    class Client(StubClient):
+        def chat(self, messages, **kwargs):
+            seen.update(kwargs)
+            return super().chat(messages, **kwargs)
+
+    check_non_negotiables(Client(["PASS"]), _listing(), "must be green")
+    assert seen["reasoning_effort"] == "none"
 
 
 def test_enrich_reports_progress():

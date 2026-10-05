@@ -1,34 +1,65 @@
 """AI-checked non-negotiable requirements: a free-text filter judged by the model
-against every known field of a listing AND its photos (colour, visible condition,
-damage, ...), not just the text -- e.g. "must be green" or "engine currently starts and
-runs, no rust" can be judged even when the description never mentions it explicitly.
+against every known field of a listing and, only where the text doesn't settle it, its
+photos (colour, visible condition, damage, ...) -- e.g. "must be green" or "engine
+currently starts and runs, no rust" can be judged even when the description never
+mentions it explicitly.
+
+Text first, photos only when needed: the model first gets just the listing's data and
+description and answers PASS, FAIL or UNKNOWN (the text doesn't say). Only on UNKNOWN are
+photos looked at, a few per call, stopping at the first clear answer. Sending all photos
+at once made the check fail both ways (live, gemma4:12b, a "Mac Mini M2 mit 8 GB RAM"
+against "more than 32 GB of RAM"): with reasoning on it ran past the 120s timeout -- and a
+timeout lets the listing through -- and with reasoning off the photos drowned out the
+"8 GB" in the text and it answered PASS. Text-only got all of them right in ~5s.
 """
 
 from __future__ import annotations
 
 import base64
+import logging
+import re
 
 import httpx
 
 from ..adapters.base import Listing
 from .client import AiUnavailable, OllamaClient
 
-_SYSTEM = (
+log = logging.getLogger("deal_finder.ai.dealbreakers")
+
+_RULES = (
     "You are screening ONE second-hand marketplace listing against a buyer's "
-    "non-negotiable requirements. Use the listing's structured data and description, "
-    "AND any attached photos (colour, visible condition, damage, etc.) if given. Only "
-    "judge the listing to FAIL when it clearly contradicts a stated requirement, or a "
-    "requirement plainly cannot be met given the stated facts (e.g. requirement is "
-    "'green' but the data says the colour is red). If the listing simply doesn't "
-    "mention something, and the photos don't show or contradict it either, give the "
-    "listing the benefit of the doubt and do not fail it for that alone. Respond with "
-    "EXACTLY one line: 'PASS' if the listing satisfies the requirements, or "
-    "'FAIL: <short reason>' if it clearly does not."
+    "non-negotiable requirements. Judge each requirement against the facts given. "
+    "Answer FAIL when the listing clearly contradicts a requirement, or a requirement "
+    "plainly cannot be met given the stated facts (e.g. requirement 'more than 32 GB of "
+    "RAM' but the listing says 8 GB; requirement 'green' but the colour is red)."
 )
 
-# Bounds the vision payload/cost per listing -- high enough to cover a typical listing's
-# full gallery (damage/rust often only shows in the later close-up photos).
+# "never a FAIL": without it the model answered "FAIL: Not stated if RAM is more than
+# 32 GB" for a listing silent on RAM.
+_TEXT_SYSTEM = _RULES + (
+    " You only get the listing's text. Something the text doesn't mention is never a "
+    "FAIL -- that's UNKNOWN. Respond with EXACTLY one line: 'FAIL: <short reason>' if "
+    "the text clearly contradicts a requirement; 'PASS' if the text shows every "
+    "requirement is met; 'UNKNOWN: <what the text doesn't say>' otherwise."
+)
+
+# Same "never a FAIL" rule: without it the photo step answered "FAIL: amount of RAM not
+# specified" for photos that just didn't show the RAM.
+_PHOTO_SYSTEM = _RULES + (
+    " The listing's text didn't settle some requirements; you now also get some of its "
+    "photos. Something neither the text nor these photos show is never a FAIL -- that's "
+    "UNKNOWN. Respond with EXACTLY one line: 'FAIL: <short reason>' if the text or these "
+    "photos clearly show a requirement is NOT met; 'PASS' if they show the unsettled "
+    "requirements ARE met; 'UNKNOWN' otherwise."
+)
+
+# Bounds the photo payload per listing -- high enough to cover a typical listing's full
+# gallery (damage/rust often only shows in the later close-up photos). Only downloaded,
+# a batch at a time, when the text alone can't decide.
 _MAX_IMAGES = 30
+# Photos per model call: live, 3 still left the text facts intact; 5 at once made the
+# model ignore a plainly stated "8 GB RAM" and answer PASS.
+_PHOTOS_PER_CALL = 3
 
 # Ollama's OpenAI-compatible endpoint rejects remote image_url values outright
 # ("image URLs are not currently supported, please use base64 encoded data instead") --
@@ -54,44 +85,70 @@ def _image_data_uri(url: str) -> str | None:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _verdict(raw: str) -> tuple[str, str]:
+    """("PASS" | "FAIL" | "UNKNOWN", detail) from the model's answer, tolerating markdown
+    ("**FAIL**: ...") and a lead-in sentence. Raises AiUnavailable if there's no verdict
+    in it at all -- an unreadable answer must not count as a PASS."""
+    text = re.sub(r"[*_`#>]", "", raw or "").strip()
+    m = re.match(r"(PASS|FAIL|UNKNOWN)\b\s*:?\s*(.*)", text, re.IGNORECASE | re.DOTALL) or re.search(
+        r"\b(FAIL|UNKNOWN|PASS)\b\s*:?\s*(.*)", text, re.IGNORECASE | re.DOTALL
+    )
+    if not m:
+        raise AiUnavailable(f"no PASS/FAIL/UNKNOWN in the model's answer: {raw!r}")
+    return m.group(1).upper(), m.group(2).strip().splitlines()[0].strip() if m.group(2).strip() else ""
+
+
+def _ask(client: OllamaClient, system: str, content) -> tuple[str, str]:
+    # No reasoning: on a thinking model it's what pushed photo checks past the timeout,
+    # and the text-only verdicts were just as right without it (and ~4x faster).
+    raw = client.chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": content}],
+        temperature=0.0,
+        reasoning_effort="none",
+    )
+    return _verdict(raw)
+
+
 def check_non_negotiables(
     client: OllamaClient, listing: Listing, requirements: str
 ) -> tuple[bool, str | None]:
     """Return (passes, reason). ``reason`` is only set when ``passes`` is False.
 
     Fails OPEN: if the requirements text is blank, or the AI call itself fails/errors
-    (model down, doesn't support vision, timeout, ...), this returns ``(True, None)`` --
-    an AI hiccup on this specific check must never silently hide a real match, matching
-    this app's "AI never blocks" principle everywhere else.
+    (model down, timeout, unreadable answer, ...), this returns ``(True, None)`` -- an AI
+    hiccup on this specific check must never silently hide a real match, matching this
+    app's "AI never blocks" principle everywhere else. (Logged, so it isn't silent.)
     """
     requirements = (requirements or "").strip()
     if not requirements:
         return True, None
 
-    content: list[dict] = [
-        {
-            "type": "text",
-            "text": (
-                f"LISTING DATA:\n{listing.as_key_value_text}\n\n"
-                f"BUYER'S NON-NEGOTIABLE REQUIREMENTS:\n{requirements}"
-            ),
-        }
-    ]
-    for url in listing.image_urls[:_MAX_IMAGES]:
-        data_uri = _image_data_uri(url)
-        if data_uri:
-            content.append({"type": "image_url", "image_url": {"url": data_uri}})
-
+    facts = f"LISTING DATA:\n{listing.as_key_value_text}\n\nBUYER'S NON-NEGOTIABLE REQUIREMENTS:\n{requirements}"
     try:
-        raw = client.chat(
-            [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": content}],
-            temperature=0.0,
-        )
-    except AiUnavailable:
+        kind, detail = _ask(client, _TEXT_SYSTEM, facts)
+        if kind == "FAIL":
+            return False, detail or "does not meet the stated requirements"
+        if kind == "PASS":
+            return True, None
+
+        # UNKNOWN: look at the photos, a few at a time, until one batch settles it.
+        unsettled = f"\n\nNOT SETTLED BY THE TEXT: {detail}" if detail else ""
+        urls = listing.image_urls[:_MAX_IMAGES]
+        for start in range(0, len(urls), _PHOTOS_PER_CALL):
+            images = [uri for url in urls[start : start + _PHOTOS_PER_CALL] if (uri := _image_data_uri(url))]
+            if not images:
+                continue
+            content = [{"type": "text", "text": facts + unsettled}] + [
+                {"type": "image_url", "image_url": {"url": uri}} for uri in images
+            ]
+            kind, detail = _ask(client, _PHOTO_SYSTEM, content)
+            if kind == "FAIL":
+                return False, detail or "does not meet the stated requirements"
+            if kind == "PASS":
+                return True, None
+    except AiUnavailable as exc:
+        log.warning("non-negotiables check skipped for %s (%s): %s", listing.url, listing.title, exc)
         return True, None
 
-    raw = raw.strip()
-    if raw.upper().startswith("FAIL"):
-        reason = raw.split(":", 1)[1].strip() if ":" in raw else "does not meet the stated requirements"
-        return False, reason
+    # Neither the text nor any photo settles it: benefit of the doubt.
     return True, None
