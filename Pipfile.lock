@@ -1203,11 +1203,11 @@
         },
         "ricardo-scraper": {
             "hashes": [
-                "sha256:800a9687d7ebbabe21d2c27a81c8c81406bde77444f94eeea7460c90e0b32cb4",
-                "sha256:cff3e8c6f2512c6edae2f699b82eff909d8971db3fb4faa0f6820839c199611c"
+                "sha256:49e6a6a0d2b88c331ff9f39223faaffbeec2575aedfad050027e2f3d858e7565",
+                "sha256:c7c6f3aca3fddd2fa04342955ac66a3f0ff0cd2de213acd02f9ba16376137993"
             ],
             "markers": "python_version >= '3.11'",
-            "version": "==0.2.1"
+            "version": "==0.2.3"
         },
         "screeninfo": {
             "hashes": [
@@ -1393,11 +1393,11 @@
         },
         "tutti-scraper": {
             "hashes": [
-                "sha256:0f82c8bc48ea1abcb6832655df8df1d4329c04dfa9a146540ada196f8947a3e5",
-                "sha256:ccee839afc7d0aa98ece746a6e5747b1fca4942f024b5b5503ebe37b7a416232"
+                "sha256:69cbe3cefafd1bad4701b39b0e78557a8da5a10de7812fbc0a3f25e050c69cbb",
+                "sha256:d757e13f018ad8bddb9018387ea5cd5fbe6cfea95356284ed0b92b9265b0e9cf"
             ],
             "markers": "python_version >= '3.11'",
-            "version": "==0.3.0"
+            "version": "==0.3.1"
         },
         "typing-extensions": {
             "hashes": [

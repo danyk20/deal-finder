@@ -46,6 +46,11 @@ class Watch(SQLModel, table=True):
     telegram_chat_id: str = ""
     # Predefined questions answered by the local AI from each listing's text.
     questions: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    # AI-picked category per marketplace, from each scraper's own category list (see
+    # site_categories.py): {"basis": <fingerprint of the inputs>, "sites": {adapter_key:
+    # {"id": <category id or None = all categories>, "path": "A > B"}}}. A cache, redone
+    # whenever the watch's fields/marketplaces no longer match "basis".
+    site_categories: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
     # True once the first (seeding) run has marked pre-existing listings as seen.
     seed_done: bool = False

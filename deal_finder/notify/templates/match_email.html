@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#1a1a1a; line-height:1.5;">
   <h2 style="margin:0 0 4px;">{{ matches|length }} new match{{ '' if matches|length == 1 else 'es' }} for "{{ watch.name }}"</h2>
-  <p style="color:#666; margin:0 0 20px;">Category: {{ watch.category }} &middot; Deal Finder</p>
+  <p style="color:#666; margin:0 0 20px;">{{ watch_type }} &middot; Deal Finder</p>
 
   {% for m in matches %}
   {% set li = m.listing %}{% set en = m.enrichment %}

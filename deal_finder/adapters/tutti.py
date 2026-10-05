@@ -7,8 +7,10 @@ exactly like the AutoScout24 one.
 Two-phase fetch (mirrors the package's own ``scrape()``): a paginated search, then one
 detail request per listing for the full body/images/attributes used by translation + AI
 Q&A. Capped to the newest ``browser_max_items_per_run`` results so a broad watch doesn't
-fire hundreds of detail requests every run; the search is pinned to tutti's ``cars``
-category so toy/accessory listings that merely mention the model don't leak in.
+fire hundreds of detail requests every run. The search is limited to the tutti category
+the AI picked for the watch from ``tutti_scraper.CATEGORY_GROUPS`` (see category_tree()
+and site_categories.py) -- e.g. ``cars`` for a car, so toy/accessory listings that merely
+mention the model don't leak in -- or searches all categories when none was picked.
 
 Every listing's ``properties`` list already carries structured car facts from tutti's own
 AutoScout integration (brand, model, body type, doors, color, fuel type, transmission,
@@ -27,18 +29,13 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timezone
 
-from tutti_scraper import scrape
+from tutti_scraper import CATEGORY_GROUPS, scrape
 
 from ..browser import extract as ex  # shared parse_price / parse_year / parse_int_km
 from ..config import Settings, get_settings
-from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
+from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery, SiteCategory
 
 log = logging.getLogger("deal_finder.adapters.tutti")
-
-# deal_finder category -> tutti categoryID. Confirmed live against a real fixture
-# (tests/fixtures/tutti_listings.json): every listing's own primaryCategory.categoryID
-# comes back "cars", matching this filter.
-_TUTTI_CATEGORY = {"car": "cars"}
 
 # Structured car property IDs tutti exposes (from its AutoScout integration). Reading these
 # is far more reliable than regex — e.g. it avoids mistaking an EV's "Reichweite 350 km"
@@ -187,21 +184,21 @@ def listing_from_api_node(node: dict) -> Listing | None:
 class TuttiAdapter(BaseAdapter):
     key = "tutti"
     label = "tutti.ch"
-    supported_categories = {"car"}
+    supported_categories = {"car", "general"}  # sells everything, not just cars
     enabled_by_default = True
     status_note = "public GraphQL API (tutti.ch) via the tutti-scraper package — no browser needed"
 
     def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
         text = (query.text or " ".join(query.terms)).strip()
         if not text:
-            raise AdapterError("tutti.ch: no search text (make/model) set on the watch")
+            raise AdapterError("tutti.ch: no search text set on the watch")
 
         settings = settings or get_settings()
         try:
             result = scrape(
                 text,
                 lang="de",
-                category=_TUTTI_CATEGORY.get(query.category),  # None -> all categories
+                category=query.site_categories.get(self.key),  # None -> all categories
                 detail=True,
                 max_results=settings.browser_max_items_per_run,
                 price_from=int(query.price_min) if query.price_min is not None else None,
@@ -222,3 +219,22 @@ class TuttiAdapter(BaseAdapter):
             return True
         except Exception:  # noqa: BLE001
             return False
+
+    def category_tree(self) -> list[SiteCategory]:
+        # Groups (e.g. "computersAccessories") aren't valid search filters -- tutti's API
+        # silently returns unrelated listings for them, and tutti-scraper rejects them --
+        # so only their sub-categories (e.g. "computers") are selectable.
+        return [
+            node
+            for group, subs in CATEGORY_GROUPS.items()
+            for node in (
+                SiteCategory(group, _words(group), selectable=False),
+                *(SiteCategory(sub, _words(sub), parent_id=group) for sub in subs),
+            )
+        ]
+
+
+def _words(category_id: str) -> str:
+    """tutti's camelCase ids as readable words for the AI/UI: "computersAccessories" ->
+    "computers accessories"."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", category_id).lower()

@@ -8,7 +8,7 @@ Self-contained: no shared deal_finder browser session, persistent profile, or ma
 "solve the challenge once" step needed for this adapter anymore -- the package handles
 its own browser lifecycle internally, one call to scrape() at a time.
 
-``category="autos"`` matters more than it looks: Ricardo is a general marketplace, not
+The category filter matters more than it looks: Ricardo is a general marketplace, not
 car-specific, so a free-text search for a make/model also surfaces non-car listings that
 merely mention it -- confirmed live, a real "Tesla Model X" search returned a wheel/rim
 set (Ricardo category "fahrzeugzubehoer", vehicle accessories) and a charger, alongside
@@ -16,7 +16,9 @@ actual cars. The rim listing's own "5000 km" was the *wheels'* wear, not a car's
 -- if it hadn't been filtered out by category, the naive year/mileage regex below would
 have attributed that number to a "car" that doesn't exist. `ricardo-scraper` already
 supports this filter (matched against each listing's JSON-LD category breadcrumbs);
-requires `detail=True` (already the case here).
+requires `detail=True` (already the case here). The category is the one the AI picked for
+the watch from the scraper's category list (see category_tree() and site_categories.py);
+with a scraper that doesn't ship that list yet, searches stay pinned to "autos".
 
 `ricardo-scraper` >=0.2.1 fixed the year/mileage gap: ricardo.ch's own "Fahrzeug-Klassierung"
 characteristics panel (year, mileage, transmission, color, fuel, ...) lives in
@@ -39,11 +41,12 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
+import ricardo_scraper
 from ricardo_scraper import scrape
 
 from ..browser import extract as ex  # shared parse_year / parse_int_km fallback
 from ..config import Settings, get_settings
-from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
+from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery, SiteCategory
 
 log = logging.getLogger("deal_finder.adapters.ricardo")
 
@@ -118,22 +121,26 @@ def listing_from_api_node(node: dict) -> Listing | None:
 class RicardoAdapter(BaseAdapter):
     key = "ricardo"
     label = "Ricardo.ch"
-    supported_categories = {"car"}
+    supported_categories = {"car", "general"}  # sells everything, not just cars
     enabled_by_default = True
     status_note = "ricardo-scraper package (Camoufox browser, bypasses Cloudflare) — no shared browser session needed"
 
     def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
         text = (query.text or " ".join(query.terms)).strip()
         if not text:
-            raise AdapterError("Ricardo.ch: no search text (make/model) set on the watch")
+            raise AdapterError("Ricardo.ch: no search text set on the watch")
 
         settings = settings or get_settings()
+        if _CATEGORIES:
+            category = query.site_categories.get(self.key)  # AI-picked; None -> all categories
+        else:
+            category = "autos"  # scraper without a category list: keep the old car-only pin
         try:
             result = scrape(
                 text,
                 locale="de",
                 detail=True,
-                category="autos",
+                category=category,
                 max_results=settings.browser_max_items_per_run,
                 price_from=query.price_min,
                 price_to=query.price_max,
@@ -154,3 +161,16 @@ class RicardoAdapter(BaseAdapter):
             return True
         except Exception:  # noqa: BLE001
             return False
+
+    def category_tree(self) -> list[SiteCategory]:
+        return [
+            SiteCategory(str(c["id"]), c["name"], str(c["parent_id"]) if c.get("parent_id") is not None else None)
+            for c in _CATEGORIES
+        ]
+
+
+# Ricardo's full category list (id/name/parent_id/depth/path, ~1700 entries), once
+# ricardo-scraper ships it importable as ``ricardo_scraper.CATEGORIES``. Up to 0.2.2 it only
+# exists in the repo's docs/categories.json, which the wheel doesn't include -- then this is
+# empty, no AI category pick happens for Ricardo, and searches stay pinned to "autos".
+_CATEGORIES: list[dict[str, Any]] = list(getattr(ricardo_scraper, "CATEGORIES", None) or [])

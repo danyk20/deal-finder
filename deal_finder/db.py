@@ -39,6 +39,7 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("watch", "notify_channel", "TEXT NOT NULL DEFAULT 'email'"),
     ("watch", "telegram_chat_id", "TEXT NOT NULL DEFAULT ''"),
     ("notificationlog", "channel", "TEXT NOT NULL DEFAULT 'email'"),
+    ("watch", "site_categories", "JSON NOT NULL DEFAULT '{}'"),
 ]
 
 

@@ -119,11 +119,12 @@ def test_search_happy_path(monkeypatch):
 
     q = _query(make="Tesla", model="Model S")
     q.price_min, q.price_max = 5000, 40000
+    q.site_categories = {"tutti": "cars", "ricardo": "39272"}
     listings = list(TuttiAdapter().search(q))
 
     assert len(listings) == len(_NODES)
     assert captured["text"] == "Tesla Model S"
-    assert captured["category"] == "cars"          # pinned to the Autos category
+    assert captured["category"] == "cars"          # the AI-picked tutti category
     assert captured["detail"] is True
     assert captured["max_results"] == 15
     assert captured["price_from"] == 5000 and captured["price_to"] == 40000
@@ -145,3 +146,21 @@ def test_search_network_error_raises_adapter_error(monkeypatch):
     monkeypatch.setattr(tutti_mod, "scrape", fake_scrape)
     with pytest.raises(AdapterError, match="request failed"):
         list(TuttiAdapter().search(_query(make="Tesla", model="Model S")))
+
+
+def test_search_without_picked_category_searches_all(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(tutti_mod, "scrape", lambda text, **kw: captured.update(kw) or _FakeResult([]))
+    list(TuttiAdapter().search(_query(make="Mac", model="Mini"), Settings()))
+    assert captured["category"] is None
+
+
+def test_category_tree_only_subcategories_selectable():
+    tree = TuttiAdapter().category_tree()
+    by_id = {n.id: n for n in tree}
+    assert by_id["computersAccessories"].selectable is False  # groups aren't valid filters
+    assert by_id["computers"].selectable is True
+    assert by_id["computers"].parent_id == "computersAccessories"
+    assert by_id["computers"].name == "computers"
+    assert by_id["computersAccessories"].name == "computers accessories"
+    assert by_id["cars"].parent_id == "vehicles"

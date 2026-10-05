@@ -148,6 +148,7 @@ def test_search_filters_to_cars_category(monkeypatch):
         return _result([])
 
     monkeypatch.setattr(ricardo, "scrape", fake_scrape)
+    monkeypatch.setattr(ricardo, "_CATEGORIES", [])  # scraper without a category list (<= 0.2.2)
     list(RicardoAdapter().search(_query(make="Tesla", model="Model X")))
 
     assert captured_kwargs["category"] == "autos"
@@ -193,3 +194,34 @@ def test_health_check(monkeypatch):
 
     monkeypatch.setattr(ricardo, "scrape", boom)
     assert RicardoAdapter().health_check() is False
+
+
+_RICARDO_CATEGORIES = [
+    {"id": 39091, "name": "Computer & Netzwerk", "parent_id": None, "depth": 0, "path": "Computer & Netzwerk"},
+    {"id": 39272, "name": "Notebooks", "parent_id": 39091, "depth": 1, "path": "Computer & Netzwerk > Notebooks"},
+]
+
+
+def test_category_tree_from_scraper_list(monkeypatch):
+    monkeypatch.setattr(ricardo, "_CATEGORIES", _RICARDO_CATEGORIES)
+    tree = RicardoAdapter().category_tree()
+    assert [(n.id, n.name, n.parent_id, n.selectable) for n in tree] == [
+        ("39091", "Computer & Netzwerk", None, True),
+        ("39272", "Notebooks", "39091", True),
+    ]
+
+
+def test_no_category_list_means_no_tree(monkeypatch):
+    monkeypatch.setattr(ricardo, "_CATEGORIES", [])
+    assert RicardoAdapter().category_tree() == []
+
+
+@pytest.mark.parametrize("picked, expected", [({"ricardo": "39272"}, "39272"), ({}, None)])
+def test_search_uses_ai_picked_category_when_scraper_has_list(monkeypatch, picked, expected):
+    captured = {}
+    monkeypatch.setattr(ricardo, "scrape", lambda text, **kw: captured.update(kw) or _result([]))
+    monkeypatch.setattr(ricardo, "_CATEGORIES", _RICARDO_CATEGORIES)
+    q = _query(make="Mac", model="Mini")
+    q.site_categories = picked
+    list(RicardoAdapter().search(q))
+    assert captured["category"] == expected  # None -> all categories

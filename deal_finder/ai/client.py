@@ -34,7 +34,11 @@ class OllamaClient:
         temperature: float = 0.0,
         max_tokens: int | None = None,
         json_mode: bool = False,
+        reasoning_effort: str | None = None,
     ) -> str:
+        """``reasoning_effort="none"`` switches off a thinking model's hidden reasoning
+        (e.g. gemma4: ~1s instead of ~100s and ~1000 reasoning tokens for a one-number
+        answer). Only sent when given; servers that don't know it ignore it."""
         body: dict = {
             "model": self.model,
             "messages": messages,
@@ -45,6 +49,8 @@ class OllamaClient:
             body["max_tokens"] = max_tokens
         if json_mode:
             body["response_format"] = {"type": "json_object"}
+        if reasoning_effort is not None:
+            body["reasoning_effort"] = reasoning_effort
         try:
             resp = httpx.post(
                 f"{self.base_url}/chat/completions", json=body, timeout=self.timeout

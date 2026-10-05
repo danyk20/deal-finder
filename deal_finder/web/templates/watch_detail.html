@@ -5,9 +5,14 @@
   <h2>{{ w.name }}
     {% if w.active %}<span class="pill on">watching</span>{% else %}<span class="pill off">stopped</span>{% endif %}
   </h2>
-  <p class="muted">{{ w.search_params.get('make','') }} {{ w.search_params.get('model','') }} ·
+  <p class="muted">{{ category.label if category else w.category }}: {{ search_text }} ·
     {{ w.schedule_kind }} <code>{{ w.schedule_value }}</code> ·
     next run: {{ next_run.strftime('%Y-%m-%d %H:%M UTC') if next_run else '—' }}</p>
+  {% if site_categories %}
+  <p class="muted">Searched category:
+    {% if site_categories.pending %}<strong>not picked yet</strong> (the AI picks it in the background after saving; all categories until then)
+    {% else %}{% for r in site_categories.rows %}{{ r.label }}: <strong>{{ r.text }}</strong> ({{ r.by }}){{ ' · ' if not loop.last else '' }}{% endfor %} · <a href="/watches/{{ w.id }}/edit#site-categories">change</a>{% endif %}</p>
+  {% endif %}
 </hgroup>
 
 <div class="action-bar">

@@ -29,6 +29,9 @@ class FieldDef:
     help: str = ""
     options: list[str] = field(default_factory=list)
     default: str = ""  # prefilled value for a brand-new watch
+    # Only meaningful when a marketplace with its own categories (tutti, Ricardo) is
+    # selected: the form hides the field while none is.
+    needs_site_categories: bool = False
 
 
 class BaseCategory:
@@ -40,6 +43,10 @@ class BaseCategory:
 
     def build_query(self, watch: "Watch") -> "MarketplaceQuery":  # pragma: no cover - interface
         raise NotImplementedError
+
+    def search_text(self, watch: "Watch") -> str:
+        """What the watch searches for, as one line (e.g. "Tesla Model S", "Mac Mini M2")."""
+        return self.build_query(watch).text
 
     def post_match(self, listing: "Listing", watch: "Watch") -> bool:
         """Category-specific filtering on top of the generic matching engine."""

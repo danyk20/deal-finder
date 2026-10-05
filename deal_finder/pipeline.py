@@ -29,7 +29,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from . import progress
+from . import progress, site_categories
 from .adapters.base import AdapterError, Listing
 from .ai import Enrichment, OllamaClient, enrich_listing
 from .config import Settings
@@ -129,7 +129,8 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
         if adapter is None:
             result.adapter_status[key] = "unknown adapter"
         elif watch.category not in adapter.supported_categories:
-            result.adapter_status[key] = f"does not support category '{watch.category}'"
+            label = getattr(get_category(watch.category), "label", watch.category)
+            result.adapter_status[key] = f"doesn't support {label} watches"
         elif not _adapter_enabled(key, settings):
             result.adapter_status[key] = "disabled in settings"
         else:
@@ -203,6 +204,14 @@ def _run_watch(
         return result
 
     query = category.build_query(watch)
+    # Marketplaces whose scraper offers a category list search only the category the AI
+    # picked for this watch (normally already picked in the background when the watch was
+    # saved; picked now if not). None/missing = all categories. Only cached on real runs,
+    # same as every other DB write here.
+    query.site_categories = site_categories.resolve(
+        session, watch, settings, ai_client=ai_client, persist=record,
+        on_status=lambda msg: progress.set_status(watch.id, msg),
+    )
     listings = _collect_listings(watch, query, category, result, settings)
     result.found = len(listings)
 

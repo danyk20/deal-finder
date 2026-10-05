@@ -95,14 +95,14 @@ def listing_from_api_item(item: dict) -> Listing | None:
 class FacebookAdapter(BaseAdapter):
     key = "facebook"
     label = "Facebook Marketplace"
-    supported_categories = {"car"}
+    supported_categories = {"car", "general"}  # sells everything, not just cars
     enabled_by_default = True  # user's explicit choice; ToS/ban risk — see module docstring
     status_note = "⚠ automated FB use risks account bans; needs a one-time login"
 
     def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
         text = (query.text or " ".join(query.terms)).strip()
         if not text:
-            raise AdapterError("Facebook Marketplace: no search text (make/model) set on the watch")
+            raise AdapterError("Facebook Marketplace: no search text set on the watch")
 
         try:
             from fb_scraper.browser import FacebookSession, LoginFailedError

@@ -1,11 +1,12 @@
-"""The 'car' category — the v1 focus (e.g. Tesla Model S)."""
+"""The 'car' watch type (e.g. Tesla Model S): make/model, plus year/mileage filters."""
 
 from __future__ import annotations
 
 from ..adapters.base import Listing, MarketplaceQuery
 from ..models import Watch
-from ..util import csv_list, to_float, to_int
+from ..util import to_int
 from .base import BaseCategory, FieldDef
+from .fields import ITEM_CATEGORY, KEYWORD_AND_AI_FIELDS, LOCATION_FIELDS, PRICE_FIELDS, common_query_kwargs
 
 
 class CarCategory(BaseCategory):
@@ -15,42 +16,16 @@ class CarCategory(BaseCategory):
     search_param_fields = [
         FieldDef("make", "Make", placeholder="Tesla"),
         FieldDef("model", "Model", placeholder="Model S"),
+        ITEM_CATEGORY,
     ]
 
     filter_fields = [
-        FieldDef("price_min", "Min price (CHF)", kind="number"),
-        FieldDef("price_max", "Max price (CHF)", kind="number"),
+        *PRICE_FIELDS,
         FieldDef("year_min", "Min year", kind="number", placeholder="2016"),
         FieldDef("year_max", "Max year", kind="number"),
         FieldDef("mileage_max", "Max mileage (km)", kind="number"),
-        FieldDef("location", "Location / canton", placeholder="Zürich"),
-        FieldDef("radius_km", "Radius (km)", kind="number"),
-        FieldDef(
-            "keywords_include",
-            "Must contain (comma-separated)",
-            help="All of these words must appear in the listing.",
-        ),
-        FieldDef(
-            "keywords_exclude",
-            "Must NOT contain (comma-separated)",
-            help="Listing is skipped if any of these words appear.",
-        ),
-        FieldDef(
-            "non_negotiables",
-            "Non-negotiables (checked by AI, incl. photos)",
-            kind="textarea",
-            default="Item is currently working.",
-            placeholder="e.g. must be green, no visible rust or accident damage, engine currently starts and runs",
-            help=(
-                "Free-text must-haves. The AI checks each listing's full data, description, "
-                "AND photos against this text, and filters out anything that clearly fails "
-                "it -- things the description never mentions (like colour) are still judged "
-                "from photos when available. A listing is only rejected when it clearly "
-                "contradicts a requirement; ambiguous/unmentioned details are not held "
-                "against it. Leave blank to disable. Costs one extra AI call per candidate "
-                "listing that already passed every other filter."
-            ),
-        ),
+        *LOCATION_FIELDS,
+        *KEYWORD_AND_AI_FIELDS,
     ]
 
     default_questions = [
@@ -68,12 +43,7 @@ class CarCategory(BaseCategory):
         return MarketplaceQuery(
             category=self.key,
             terms=terms,
-            price_min=to_float(f.get("price_min")),
-            price_max=to_float(f.get("price_max")),
-            location=(f.get("location") or None),
-            radius_km=to_int(f.get("radius_km")),
-            keywords_include=csv_list(f.get("keywords_include")),
-            keywords_exclude=csv_list(f.get("keywords_exclude")),
+            **common_query_kwargs(f),
             params={
                 "make": sp.get("make"),
                 "model": sp.get("model"),

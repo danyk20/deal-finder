@@ -13,6 +13,7 @@ from ..adapters.base import Listing
 from ..ai import Enrichment
 from ..config import Settings
 from ..models import Watch
+from ..registry import get_category
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _env = Environment(
@@ -34,10 +35,13 @@ class EmailNotConfigured(Exception):
 
 def render_email(watch: Watch, matches: list[EmailMatch]) -> tuple[str, str]:
     """Return (subject, html_body)."""
-    item = (watch.search_params or {}).get("model") or watch.name
+    category = get_category(watch.category)
+    item = (category.search_text(watch) if category else "") or watch.name
     n = len(matches)
     subject = f"Deal Finder: {n} new {item} match{'' if n == 1 else 'es'}"
-    html = _env.get_template("match_email.html").render(watch=watch, matches=matches)
+    html = _env.get_template("match_email.html").render(
+        watch=watch, matches=matches, watch_type=category.label if category else watch.category
+    )
     return subject, html
 
 

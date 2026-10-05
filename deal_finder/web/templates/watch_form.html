@@ -8,18 +8,52 @@
     <input type="text" name="name" value="{{ watch.name if watch else '' }}" placeholder="Tesla Model S under 40k in Zürich" required>
   </label>
 
-  <input type="hidden" name="category" value="{{ category.key }}">
-  <p class="muted">Category: <strong>{{ category.label }}</strong></p>
+  {# Marketplaces with their own categories (tutti, Ricardo): the category UI below is only
+     shown while at least one of them is ticked -- see the script at the end. #}
+  {% set cat_keys = site_category_choices | map(attribute='key') | list %}
+  {% set any_cat_selected = cat_keys | select('in', selected_mkt) | list | length > 0 %}
+  <label>Watch type
+    <select name="category" id="watch-type">
+      {% for c in categories %}
+      <option value="{{ c.key }}" {{ 'selected' if c.key == category.key else '' }}>{{ c.label }}</option>
+      {% endfor %}
+    </select>
+    <small class="muted">Car: make, model, year and mileage, also on the car-only marketplaces. General item: one search text, for anything else.</small>
+  </label>
 
   <h4>What to search for</h4>
   <div class="grid-2">
     {% for f in category.search_param_fields %}
-    <label>{{ f.label }}
+    <label{% if f.needs_site_categories %} data-needs-site-category{{ ' hidden' if not any_cat_selected else '' }}{% endif %}>{{ f.label }}
       <input type="{{ 'number' if f.kind == 'number' else 'text' }}" name="sp_{{ f.name }}"
-             value="{{ (watch.search_params.get(f.name, '') if watch else '') }}" placeholder="{{ f.placeholder }}">
+             value="{{ sp_values.get(f.name, '') }}" placeholder="{{ f.placeholder }}">
+      {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}
     </label>
     {% endfor %}
   </div>
+
+  {% if site_category_choices %}
+  <div id="site-categories" data-needs-site-category{{ ' hidden' if not any_cat_selected else '' }}>
+  <h4>Marketplace category</h4>
+  <p class="muted">Picked by the AI from each marketplace's own categories; you can switch to one of its other top matches, or to all categories.</p>
+  <div class="grid-2">
+    {% for c in site_category_choices %}
+    {% set ticked = c.key in selected_mkt %}
+    <label data-site-category="{{ c.key }}"{{ ' hidden' if not ticked else '' }}>{{ c.label }}
+      {% if c.pending %}
+      <select disabled data-always-disabled><option>Not picked yet — the AI picks it after saving</option></select>
+      {% else %}
+      <select name="sitecat_{{ c.key }}"{{ ' disabled' if not ticked else '' }}>
+        {% for o in c.options %}
+        <option value="{{ o.value }}" {{ 'selected' if o.value == c.selected else '' }}>{{ o.label }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+    </label>
+    {% endfor %}
+  </div>
+  </div>
+  {% endif %}
 
   <h4>Filters</h4>
   <div class="grid-2">
@@ -82,4 +116,48 @@
     <a href="{{ '/watches/' ~ watch.id if watch else '/' }}" role="button" class="secondary">Cancel</a>
   </div>
 </form>
+
+<script>
+  // The watch type decides the form's fields and marketplaces: switching it reloads the
+  // form for that type (saving then switches the watch).
+  (function () {
+    var form = document.querySelector('form');
+    var dirty = false;
+    form.addEventListener('input', function (e) { if (e.target.id !== 'watch-type') dirty = true; });
+    var picker = document.getElementById('watch-type');
+    var initial = picker.value;
+    picker.addEventListener('change', function () {
+      if (dirty && !confirm('Switching the watch type reloads the form; unsaved changes are lost. Continue?')) {
+        picker.value = initial;
+        return;
+      }
+      location.search = '?watch_type=' + encodeURIComponent(picker.value);
+    });
+  })();
+
+  // Show each marketplace's category dropdown only while that marketplace is ticked, and
+  // the whole category UI (section + free-text "Category" field) only while at least one
+  // marketplace with categories is. Hidden dropdowns are disabled so they aren't submitted;
+  // the free-text field keeps its value (it just isn't used by anything else).
+  (function () {
+    var catKeys = {{ cat_keys | tojson }};
+    var boxes = Array.prototype.filter.call(
+      document.querySelectorAll('input[name="marketplaces"]'),
+      function (b) { return catKeys.indexOf(b.value) >= 0; }
+    );
+    function update() {
+      var anyTicked = false;
+      boxes.forEach(function (b) {
+        if (b.checked) anyTicked = true;
+        document.querySelectorAll('[data-site-category="' + b.value + '"]').forEach(function (el) {
+          el.hidden = !b.checked;
+          el.querySelectorAll('select:not([data-always-disabled])').forEach(function (s) { s.disabled = !b.checked; });
+        });
+      });
+      document.querySelectorAll('[data-needs-site-category]').forEach(function (el) { el.hidden = !anyTicked; });
+    }
+    boxes.forEach(function (b) { b.addEventListener('change', update); });
+    update();
+  })();
+</script>
 {% endblock %}

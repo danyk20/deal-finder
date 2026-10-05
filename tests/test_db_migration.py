@@ -67,6 +67,18 @@ def test_migration_adds_missing_columns_with_backward_compatible_defaults(tmp_pa
     assert log_row == ("old subject", "me@x.com", "email")
 
 
+def test_migration_adds_site_categories_as_empty_json(tmp_path):
+    """An existing watch gets an empty AI category pick ({}): it's picked on the next
+    save/run, and until then every marketplace searches all categories."""
+    import json
+
+    engine = _old_schema_engine(tmp_path)
+    _migrate_schema(engine)
+    with engine.connect() as conn:
+        raw = conn.exec_driver_sql("SELECT site_categories FROM watch WHERE id=1").scalar_one()
+    assert json.loads(raw) == {}
+
+
 def test_migration_is_idempotent(tmp_path):
     engine = _old_schema_engine(tmp_path)
     _migrate_schema(engine)

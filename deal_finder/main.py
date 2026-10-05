@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from .db import init_db
 from .scheduler import shutdown_scheduler, start_scheduler
+from .site_categories import resolve_stale_in_background
 from .web.api import router as api_router
 from .web.routes import router as web_router
 
@@ -21,6 +22,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     init_db()
     start_scheduler()
+    resolve_stale_in_background()
     try:
         yield
     finally:

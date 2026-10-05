@@ -29,6 +29,10 @@ class MarketplaceQuery:
     keywords_include: list[str] = field(default_factory=list)
     keywords_exclude: list[str] = field(default_factory=list)
     params: dict[str, Any] = field(default_factory=dict)  # raw category params
+    # Adapter key -> the marketplace's own category id the search is limited to, as picked
+    # by the AI from that adapter's category_tree() (see site_categories.py). A missing
+    # key or None means "search all categories".
+    site_categories: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def text(self) -> str:
@@ -79,6 +83,19 @@ class Listing:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class SiteCategory:
+    """One node of a marketplace's own category tree, as offered by its scraper package.
+
+    ``selectable`` is False for grouping nodes the marketplace can't actually filter on
+    (e.g. tutti's category groups: only their sub-categories are valid search filters)."""
+
+    id: str
+    name: str
+    parent_id: str | None = None
+    selectable: bool = True
+
+
 class AdapterError(Exception):
     """Recoverable adapter failure (network error, bot challenge, parse problem).
 
@@ -124,3 +141,9 @@ class BaseAdapter:
     def health_check(self) -> bool:
         """Quick self-test that the endpoint/parser still works. Override per adapter."""
         return True
+
+    def category_tree(self) -> list[SiteCategory]:
+        """The marketplace's own categories a search can be limited to (flat list, linked
+        by ``parent_id``). Empty = this marketplace/scraper doesn't support a category
+        filter, so the AI category pick is skipped for it and it searches as before."""
+        return []

@@ -14,6 +14,7 @@ from .models import NotificationLog, SeenListing, Watch, utcnow
 from .pipeline import RunResult, run_watch
 from .registry import get_category
 from .scheduler import schedule_watch, unschedule_watch
+from .site_categories import apply_user_choices, resolve_in_background
 
 _SCHEDULE_FIELDS = {"schedule_kind", "schedule_value"}
 
@@ -26,6 +27,7 @@ def _apply_questions_default(watch: Watch) -> None:
 
 
 def create_watch(session: Session, data: dict[str, Any]) -> Watch:
+    data = {k: v for k, v in data.items() if k != "site_category_choices"}  # nothing picked yet
     watch = Watch(**data)
     _apply_questions_default(watch)
     session.add(watch)
@@ -33,10 +35,15 @@ def create_watch(session: Session, data: dict[str, Any]) -> Watch:
     session.refresh(watch)
     if watch.active:
         schedule_watch(watch)
+    resolve_in_background(session, watch)
     return watch
 
 
 def update_watch(session: Session, watch: Watch, data: dict[str, Any]) -> Watch:
+    data = dict(data)
+    # Applied to the pick the form was showing; if the other fields changed too, the
+    # background re-pick keeps this choice when it's still among the new candidates.
+    apply_user_choices(watch, data.pop("site_category_choices", None) or {})
     for key, value in data.items():
         if value is not None:
             setattr(watch, key, value)
@@ -49,6 +56,7 @@ def update_watch(session: Session, watch: Watch, data: dict[str, Any]) -> Watch:
         schedule_watch(watch)  # add or replace (picks up any schedule change)
     else:
         unschedule_watch(watch.id)
+    resolve_in_background(session, watch)
     return watch
 
 

@@ -25,8 +25,9 @@ from .adapters.ricardo import RicardoAdapter
 from .adapters.tutti import TuttiAdapter
 from .categories.base import BaseCategory
 from .categories.car import CarCategory
+from .categories.general import GeneralCategory
 
-CATEGORIES: dict[str, BaseCategory] = {c.key: c for c in (CarCategory(),)}
+CATEGORIES: dict[str, BaseCategory] = {c.key: c for c in (CarCategory(), GeneralCategory())}
 
 ADAPTERS: dict[str, BaseAdapter] = {
     a.key: a

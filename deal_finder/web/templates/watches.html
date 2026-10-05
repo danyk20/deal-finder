@@ -19,7 +19,7 @@
   {% for r in rows %}
     {% set w = r.w %}
     <tr>
-      <td><a href="/watches/{{ w.id }}">{{ w.name }}</a><br><small class="muted">{{ w.search_params.get('make','') }} {{ w.search_params.get('model','') }}</small></td>
+      <td><a href="/watches/{{ w.id }}">{{ w.name }}</a><br><small class="muted">{{ r.search_text }}</small></td>
       <td>{% if w.active %}<span class="pill on">watching</span>{% else %}<span class="pill off">stopped</span>{% endif %}</td>
       <td>{{ w.schedule_kind }}: <code>{{ w.schedule_value }}</code></td>
       <td><small>{{ w.marketplaces | join(', ') or '—' }}</small></td>
