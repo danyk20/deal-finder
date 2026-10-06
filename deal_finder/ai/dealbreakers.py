@@ -15,6 +15,11 @@ timeout lets the listing through -- and with reasoning off the photos drowned ou
 An UNKNOWN also says whether a photo could settle it at all: "free supercharging", a
 service history or how the engine runs never show in a photo, and looking anyway cost up
 to 10 photo calls (~16s each, live) per listing, all answering UNKNOWN.
+
+Each line of the requirements is one requirement, judged on its own, and the first FAIL
+ends the check. Judged together, the model mixed them up: "must be green and have free
+supercharging" against a listing saying only "green" came back "FAIL: no free
+supercharging" (live, gemma4:12b, every time) -- a real match silently dropped.
 """
 
 from __future__ import annotations
@@ -31,12 +36,16 @@ from .client import AiUnavailable, OllamaClient
 
 log = logging.getLogger("deal_finder.ai.dealbreakers")
 
+# "several parts": a line can still hold more than one thing ("green and free
+# supercharging"); without it the unmentioned part was a FAIL.
 _RULES = (
-    "You are screening ONE second-hand marketplace listing against a buyer's "
-    "non-negotiable requirements. Judge each requirement against the facts given. "
-    "Answer FAIL when the listing clearly contradicts a requirement, or a requirement "
-    "plainly cannot be met given the stated facts (e.g. requirement 'more than 32 GB of "
-    "RAM' but the listing says 8 GB; requirement 'green' but the colour is red)."
+    "You are screening ONE second-hand marketplace listing against ONE of a buyer's "
+    "non-negotiable requirements. Answer FAIL when the listing clearly contradicts the "
+    "requirement, or the requirement plainly cannot be met given the stated facts (e.g. "
+    "requirement 'more than 32 GB of RAM' but the listing says 8 GB; requirement 'green' "
+    "but the colour is red). If the requirement has several parts, judge each part on its "
+    "own: a part the facts don't mention is never a FAIL, even when the other parts are "
+    "mentioned or met."
 )
 
 # "never a FAIL": without it the model answered "FAIL: Not stated if RAM is more than
@@ -45,7 +54,7 @@ _RULES = (
 _TEXT_SYSTEM = _RULES + (
     " You only get the listing's text. Something the text doesn't mention is never a "
     "FAIL -- that's UNKNOWN. Respond with EXACTLY one line: 'FAIL: <short reason>' if "
-    "the text clearly contradicts a requirement; 'PASS' if the text shows every "
+    "the text clearly contradicts the requirement; 'PASS' if the text shows the "
     "requirement is met; otherwise 'UNKNOWN: <what the text doesn't say> | PHOTOS: YES' "
     "if a photo of the item itself could show what's missing (e.g. its colour, visible "
     "damage or rust, what's included), or 'UNKNOWN: <what the text doesn't say> | PHOTOS: NO' "
@@ -57,11 +66,11 @@ _PHOTOS_RE = re.compile(r"\|?\s*PHOTOS?\s*:?\s*(YES|NO)\b\.?", re.IGNORECASE)
 # Same "never a FAIL" rule: without it the photo step answered "FAIL: amount of RAM not
 # specified" for photos that just didn't show the RAM.
 _PHOTO_SYSTEM = _RULES + (
-    " The listing's text didn't settle some requirements; you now also get some of its "
+    " The listing's text didn't settle the requirement; you now also get some of its "
     "photos. Something neither the text nor these photos show is never a FAIL -- that's "
     "UNKNOWN. Respond with EXACTLY one line: 'FAIL: <short reason>' if the text or these "
-    "photos clearly show a requirement is NOT met; 'PASS' if they show the unsettled "
-    "requirements ARE met; 'UNKNOWN' otherwise."
+    "photos clearly show the requirement is NOT met; 'PASS' if they show it IS met; "
+    "'UNKNOWN' otherwise."
 )
 
 # Bounds the photo payload per listing -- high enough to cover a typical listing's full
@@ -130,58 +139,74 @@ def _ask(client: OllamaClient, system: str, content) -> tuple[str, str]:
     return _verdict(_chat(client, system, content))
 
 
+def requirement_lines(requirements: str) -> list[str]:
+    """The separate requirements in a watch's non-negotiables text: one per line."""
+    return [line.strip() for line in (requirements or "").splitlines() if line.strip()]
+
+
 def check_non_negotiables(
     client: OllamaClient, listing: Listing, requirements: str
 ) -> tuple[bool, str | None]:
     """Return (passes, reason). ``reason`` is only set when ``passes`` is False.
 
+    Every line of ``requirements`` is checked on its own, in order, and the first FAIL
+    rejects the listing without checking the rest. All of them are judged from the text
+    first; photos are only looked at afterwards, for the ones the text left open -- so a
+    FAIL any line's text shows never waits behind photo calls for another line.
+
     Fails OPEN: if the requirements text is blank, or the AI call itself fails/errors
     (model down, timeout, unreadable answer, ...), this returns ``(True, None)`` -- an AI
     hiccup on this specific check must never silently hide a real match, matching this
     app's "AI never blocks" principle everywhere else. (Logged, so it isn't silent.)
+    A requirement neither the text nor the photos settle gets the benefit of the doubt.
     """
-    requirements = (requirements or "").strip()
-    if not requirements:
+    lines = requirement_lines(requirements)
+    if not lines:
         return True, None
 
-    facts = f"LISTING DATA:\n{listing.as_key_value_text}\n\nBUYER'S NON-NEGOTIABLE REQUIREMENTS:\n{requirements}"
+    def facts(requirement: str) -> str:
+        return f"LISTING DATA:\n{listing.as_key_value_text}\n\nBUYER'S NON-NEGOTIABLE REQUIREMENT:\n{requirement}"
+
     # Photos download a batch at a time, in parallel, and the next batch downloads while
     # the model looks at the current one. Nothing is downloaded before the text step: it
-    # settles most listings on its own.
+    # settles most listings on its own. Downloaded photos are reused for the next line.
+    urls = listing.image_urls[:_MAX_IMAGES]
+    batches = [urls[start : start + _PHOTOS_PER_CALL] for start in range(0, len(urls), _PHOTOS_PER_CALL)]
     downloads = ThreadPoolExecutor(max_workers=_PHOTOS_PER_CALL, thread_name_prefix="photos")
+    fetched: dict[int, list[Future]] = {}
+
+    def photos(i: int) -> list[str]:
+        for j in (i, i + 1):  # this batch, and the next one in the background
+            if j < len(batches) and j not in fetched:
+                fetched[j] = [downloads.submit(_image_data_uri, url) for url in batches[j]]
+        return [uri for f in fetched[i] if (uri := f.result())]
+
     try:
-        raw = _chat(client, _TEXT_SYSTEM, facts)
-        kind, detail = _verdict(raw)
-        if kind == "FAIL":
-            return False, detail or "does not meet the stated requirements"
-        if kind == "PASS":
-            return True, None
-        if not _photos_could_help(raw):
-            return True, None  # benefit of the doubt, as when no photo settles it
-
-        # UNKNOWN: look at the photos, a few at a time, until one batch settles it.
-        detail = _PHOTOS_RE.sub("", detail).strip(" |")
-        unsettled = f"\n\nNOT SETTLED BY THE TEXT: {detail}" if detail else ""
-        urls = listing.image_urls[:_MAX_IMAGES]
-        batches = [urls[start : start + _PHOTOS_PER_CALL] for start in range(0, len(urls), _PHOTOS_PER_CALL)]
-
-        def download(batch: list[str]) -> list[Future]:
-            return [downloads.submit(_image_data_uri, url) for url in batch]
-
-        pending = download(batches[0]) if batches else []
-        for i in range(len(batches)):
-            images = [uri for f in pending if (uri := f.result())]
-            pending = download(batches[i + 1]) if i + 1 < len(batches) else []
-            if not images:
-                continue
-            content = [{"type": "text", "text": facts + unsettled}] + [
-                {"type": "image_url", "image_url": {"url": uri}} for uri in images
-            ]
-            kind, detail = _ask(client, _PHOTO_SYSTEM, content)
+        open_lines: list[tuple[str, str]] = []  # (requirement, what the text doesn't say)
+        for requirement in lines:
+            raw = _chat(client, _TEXT_SYSTEM, facts(requirement))
+            kind, detail = _verdict(raw)
             if kind == "FAIL":
-                return False, detail or "does not meet the stated requirements"
-            if kind == "PASS":
-                return True, None
+                return False, detail or f"doesn't meet: {requirement}"
+            if kind == "UNKNOWN" and _photos_could_help(raw):
+                open_lines.append((requirement, _PHOTOS_RE.sub("", detail).strip(" |")))
+
+        # The text left these open: look at the photos, a few at a time, until one batch
+        # settles it.
+        for requirement, detail in open_lines:
+            unsettled = f"\n\nNOT SETTLED BY THE TEXT: {detail}" if detail else ""
+            for i in range(len(batches)):
+                images = photos(i)
+                if not images:
+                    continue
+                content = [{"type": "text", "text": facts(requirement) + unsettled}] + [
+                    {"type": "image_url", "image_url": {"url": uri}} for uri in images
+                ]
+                kind, detail_from_photos = _ask(client, _PHOTO_SYSTEM, content)
+                if kind == "FAIL":
+                    return False, detail_from_photos or f"doesn't meet: {requirement}"
+                if kind == "PASS":
+                    break
     except AiUnavailable as exc:
         log.warning("non-negotiables check skipped for %s (%s): %s", listing.url, listing.title, exc)
         return True, None
@@ -189,5 +214,4 @@ def check_non_negotiables(
         # Don't wait for a next batch nobody will look at.
         downloads.shutdown(wait=False, cancel_futures=True)
 
-    # Neither the text nor any photo settles it: benefit of the doubt.
     return True, None

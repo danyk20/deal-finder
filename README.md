@@ -13,9 +13,9 @@ listings, translated and pre-analyzed by a **free local AI**.
 - **AI-enriched** — translates the description into your chosen language and answers
   your questions (condition, known issues, pickup, …) using [Ollama](https://ollama.com).
   No API keys, no cost.
-- **AI-checked non-negotiables** — a free-text "must-have" filter (e.g. "must be green,
-  no visible rust, engine currently runs") judged against the listing's full data AND
-  its photos, not just the description.
+- **AI-checked non-negotiables** — free-text "must-haves", one per line (e.g. "must be
+  green", "no visible rust", "engine currently runs"), each judged against the listing's
+  full data AND its photos, not just the description.
 - **Transparent filtering** — every run shows not just what matched, but every listing
   that was found and *why* it got filtered out.
 - **Extensible** — new item types (houses, phones, …) and new marketplaces are one file each.
@@ -120,13 +120,17 @@ Q&A answers are drawn from every scraped field (price, year, mileage, fuel, loca
 condition, …), not just the free-text description — many answers only exist in
 structured data the marketplace exposes but never actually writes out in prose.
 
-**Non-negotiables**: each car watch has a free-text "Non-negotiables" filter (Settings
-form, default `Item is currently working.`) that the AI checks per candidate listing
-against its full data *and* photos — e.g. "must be green" is judged from the pictures
-even if the description never mentions colour. It runs last in the filter chain (after
-the free price/keyword/location checks), so it only costs an AI call on listings that
-already look like a real match, and it fails open (never hides a listing) if the AI
-check itself errors.
+**Non-negotiables**: each watch has a free-text "Non-negotiables" filter (watch form,
+default `Item is currently working.`), one requirement per line, that the AI checks per
+candidate listing against its full data *and* photos — e.g. "must be green" is judged
+from the pictures even if the description never mentions colour. Each line is judged on
+its own, and the first line a listing clearly fails rejects it without checking the rest.
+Every line is read against the text first; photos are only looked at for lines the text
+leaves open, and only when a photo could show the answer (never for e.g. "free
+supercharging"). A line nothing settles gets the benefit of the doubt. It runs last in
+the filter chain (after the free price/keyword/location checks), so it only costs AI
+calls on listings that already look like a real match, and it fails open (never hides a
+listing) if the AI check itself errors.
 
 <details>
 <summary><strong>Choosing a model for your system RAM</strong> (recommendations as of July 2026)</summary>

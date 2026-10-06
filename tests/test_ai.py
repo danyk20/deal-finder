@@ -279,6 +279,53 @@ def test_check_non_negotiables_downloads_next_photos_while_the_model_looks(monke
     assert seen_during_first_photo_call == [True]
 
 
+def _user_text(message):
+    content = message[1]["content"]
+    return content if isinstance(content, str) else next(p["text"] for p in content if p.get("type") == "text")
+
+
+def test_check_non_negotiables_judges_each_line_on_its_own():
+    """The bug: judged together, "must be green and have free supercharging" against a
+    listing saying only "green" came back "FAIL: no free supercharging"."""
+    client = StubClient(["PASS", "UNKNOWN: free supercharging | PHOTOS: NO"])
+    requirements = "\n  must be green \n\nhave free supercharging\n"
+    assert check_non_negotiables(client, _listing(), requirements) == (True, None)
+    assert client.calls == 2  # blank lines aren't requirements
+    first, second = (_user_text(m) for m in client.messages)
+    assert "must be green" in first and "supercharging" not in first
+    assert "have free supercharging" in second and "green" not in second
+
+
+def test_check_non_negotiables_stops_at_the_first_fail():
+    client = StubClient(["PASS", "FAIL: visible rust on the doors", "PASS"])
+    requirements = "must be green\nno visible rust\nfree supercharging"
+    assert check_non_negotiables(client, _listing(), requirements) == (False, "visible rust on the doors")
+    assert client.calls == 2  # the third line is never asked about
+
+
+def test_check_non_negotiables_reads_every_line_before_any_photo(monkeypatch):
+    """A FAIL the text shows for a later line doesn't wait behind photo calls for an
+    earlier line the text left open."""
+    listing, fetched = _photos(monkeypatch, 6)
+    client = StubClient(["UNKNOWN: colour | PHOTOS: YES", "FAIL: only 8 GB of RAM"])
+    requirements = "must be green\nmore than 32 GB of RAM"
+    assert check_non_negotiables(client, listing, requirements) == (False, "only 8 GB of RAM")
+    assert client.calls == 2 and fetched == []
+
+
+def test_check_non_negotiables_photos_settle_each_open_line_in_turn(monkeypatch):
+    listing, fetched = _photos(monkeypatch, 3)
+    client = StubClient([
+        "UNKNOWN: colour | PHOTOS: YES", "UNKNOWN: rust | PHOTOS: YES",  # text, both lines
+        "PASS", "FAIL: rust on the sills",  # photos: green confirmed, then rust seen
+    ])
+    result = check_non_negotiables(client, listing, "must be green\nno visible rust")
+    assert result == (False, "rust on the sills")
+    assert [len(_image_parts(m)) for m in client.messages] == [0, 0, 3, 3]
+    assert "no visible rust" in _user_text(client.messages[3]) and "green" not in _user_text(client.messages[3])
+    assert sorted(fetched) == sorted(listing.image_urls)  # downloaded once, reused
+
+
 def test_check_non_negotiables_photos_can_confirm(monkeypatch):
     listing, _ = _photos(monkeypatch, 4)
     client = StubClient(["UNKNOWN: colour", "PASS"])

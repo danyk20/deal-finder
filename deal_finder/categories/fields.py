@@ -47,15 +47,16 @@ KEYWORD_AND_AI_FIELDS = [
         "Non-negotiables (checked by AI, incl. photos)",
         kind="textarea",
         default="Item is currently working.",
-        placeholder="e.g. must be green, no visible rust or accident damage, engine currently starts and runs",
+        placeholder="One per line, e.g.\nmust be green\nno visible rust or accident damage\nengine currently starts and runs",
         help=(
-            "Free-text must-haves. The AI checks each listing's full data, description, "
-            "AND photos against this text, and filters out anything that clearly fails "
-            "it -- things the description never mentions (like colour) are still judged "
-            "from photos when available. A listing is only rejected when it clearly "
-            "contradicts a requirement; ambiguous/unmentioned details are not held "
-            "against it. Leave blank to disable. Costs one extra AI call per candidate "
-            "listing that already passed every other filter."
+            "Free-text must-haves, ONE PER LINE. The AI checks each line on its own "
+            "against each listing's full data, description, AND photos, and filters out "
+            "a listing as soon as one line clearly fails -- things the description never "
+            "mentions (like colour) are still judged from photos when available. A "
+            "listing is only rejected when it clearly contradicts a requirement; "
+            "ambiguous/unmentioned details are not held against it. Leave blank to "
+            "disable. Costs about one AI call per line for each listing that already "
+            "passed every other filter."
         ),
     ),
 ]
