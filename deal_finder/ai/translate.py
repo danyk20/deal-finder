@@ -34,11 +34,15 @@ def translate_text(
         f"If it is already in {target}, return it unchanged. Output ONLY the "
         "translation, with no preamble, notes, or quotation marks."
     )
+    # No reasoning: on a thinking model (gemma4) a translation with it on ran past 4 minutes
+    # (live, a ~250-word tutti description) -- and past the timeout, which drops the
+    # translation and every answer -- vs ~25s without, for the same translation.
     result = client.chat(
         [
             {"role": "system", "content": system},
             {"role": "user", "content": text},
         ],
         temperature=0.1,
+        reasoning_effort="none",
     )
     return result.strip()

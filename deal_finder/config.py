@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     ollama_model: str = "gemma4:12b"
     ollama_timeout: float = 120.0
     ai_translate_to: str = "English"  # target language for the description translation step
+    # AI requests a run sends at once; above 1 only does anything when Ollama itself runs
+    # with OLLAMA_NUM_PARALLEL > 1. Measured on an M2 with gemma4:12b and Ollama allowed 3:
+    # 3 at once made non-negotiables checks and answers ~20% slower and translations 1.27x
+    # faster -- so 1, one after another.
+    ai_parallel_requests: int = 1
 
     # --- Telegram (optional alternative to email; per-watch choice) ---
     telegram_bot_token: str = ""          # from @BotFather
@@ -87,6 +92,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "ollama_model",
     "ollama_timeout",
     "ai_translate_to",
+    "ai_parallel_requests",
     "telegram_bot_token",
     "telegram_default_chat_id",
     "default_notify_email",

@@ -11,6 +11,10 @@ at once made the check fail both ways (live, gemma4:12b, a "Mac Mini M2 mit 8 GB
 against "more than 32 GB of RAM"): with reasoning on it ran past the 120s timeout -- and a
 timeout lets the listing through -- and with reasoning off the photos drowned out the
 "8 GB" in the text and it answered PASS. Text-only got all of them right in ~5s.
+
+An UNKNOWN also says whether a photo could settle it at all: "free supercharging", a
+service history or how the engine runs never show in a photo, and looking anyway cost up
+to 10 photo calls (~16s each, live) per listing, all answering UNKNOWN.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import httpx
 
@@ -35,13 +40,19 @@ _RULES = (
 )
 
 # "never a FAIL": without it the model answered "FAIL: Not stated if RAM is more than
-# 32 GB" for a listing silent on RAM.
+# 32 GB" for a listing silent on RAM. The "| PHOTOS:" part (live, gemma4:12b): NO for free
+# supercharging, how the engine runs and when the seller joined; YES for colour and rust.
 _TEXT_SYSTEM = _RULES + (
     " You only get the listing's text. Something the text doesn't mention is never a "
     "FAIL -- that's UNKNOWN. Respond with EXACTLY one line: 'FAIL: <short reason>' if "
     "the text clearly contradicts a requirement; 'PASS' if the text shows every "
-    "requirement is met; 'UNKNOWN: <what the text doesn't say>' otherwise."
+    "requirement is met; otherwise 'UNKNOWN: <what the text doesn't say> | PHOTOS: YES' "
+    "if a photo of the item itself could show what's missing (e.g. its colour, visible "
+    "damage or rust, what's included), or 'UNKNOWN: <what the text doesn't say> | PHOTOS: NO' "
+    "if no photo of the item could show it (e.g. an included service or perk, its history, "
+    "how it runs, facts about the seller)."
 )
+_PHOTOS_RE = re.compile(r"\|?\s*PHOTOS?\s*:?\s*(YES|NO)\b\.?", re.IGNORECASE)
 
 # Same "never a FAIL" rule: without it the photo step answered "FAIL: amount of RAM not
 # specified" for photos that just didn't show the RAM.
@@ -98,15 +109,25 @@ def _verdict(raw: str) -> tuple[str, str]:
     return m.group(1).upper(), m.group(2).strip().splitlines()[0].strip() if m.group(2).strip() else ""
 
 
-def _ask(client: OllamaClient, system: str, content) -> tuple[str, str]:
+def _photos_could_help(raw: str) -> bool:
+    """Whether the text step's UNKNOWN said a photo could settle it. No answer either way
+    means look, as before this question existed."""
+    m = _PHOTOS_RE.search(raw or "")
+    return m is None or m.group(1).upper() == "YES"
+
+
+def _chat(client: OllamaClient, system: str, content) -> str:
     # No reasoning: on a thinking model it's what pushed photo checks past the timeout,
     # and the text-only verdicts were just as right without it (and ~4x faster).
-    raw = client.chat(
+    return client.chat(
         [{"role": "system", "content": system}, {"role": "user", "content": content}],
         temperature=0.0,
         reasoning_effort="none",
     )
-    return _verdict(raw)
+
+
+def _ask(client: OllamaClient, system: str, content) -> tuple[str, str]:
+    return _verdict(_chat(client, system, content))
 
 
 def check_non_negotiables(
@@ -124,18 +145,33 @@ def check_non_negotiables(
         return True, None
 
     facts = f"LISTING DATA:\n{listing.as_key_value_text}\n\nBUYER'S NON-NEGOTIABLE REQUIREMENTS:\n{requirements}"
+    # Photos download a batch at a time, in parallel, and the next batch downloads while
+    # the model looks at the current one. Nothing is downloaded before the text step: it
+    # settles most listings on its own.
+    downloads = ThreadPoolExecutor(max_workers=_PHOTOS_PER_CALL, thread_name_prefix="photos")
     try:
-        kind, detail = _ask(client, _TEXT_SYSTEM, facts)
+        raw = _chat(client, _TEXT_SYSTEM, facts)
+        kind, detail = _verdict(raw)
         if kind == "FAIL":
             return False, detail or "does not meet the stated requirements"
         if kind == "PASS":
             return True, None
+        if not _photos_could_help(raw):
+            return True, None  # benefit of the doubt, as when no photo settles it
 
         # UNKNOWN: look at the photos, a few at a time, until one batch settles it.
+        detail = _PHOTOS_RE.sub("", detail).strip(" |")
         unsettled = f"\n\nNOT SETTLED BY THE TEXT: {detail}" if detail else ""
         urls = listing.image_urls[:_MAX_IMAGES]
-        for start in range(0, len(urls), _PHOTOS_PER_CALL):
-            images = [uri for url in urls[start : start + _PHOTOS_PER_CALL] if (uri := _image_data_uri(url))]
+        batches = [urls[start : start + _PHOTOS_PER_CALL] for start in range(0, len(urls), _PHOTOS_PER_CALL)]
+
+        def download(batch: list[str]) -> list[Future]:
+            return [downloads.submit(_image_data_uri, url) for url in batch]
+
+        pending = download(batches[0]) if batches else []
+        for i in range(len(batches)):
+            images = [uri for f in pending if (uri := f.result())]
+            pending = download(batches[i + 1]) if i + 1 < len(batches) else []
             if not images:
                 continue
             content = [{"type": "text", "text": facts + unsettled}] + [
@@ -149,6 +185,9 @@ def check_non_negotiables(
     except AiUnavailable as exc:
         log.warning("non-negotiables check skipped for %s (%s): %s", listing.url, listing.title, exc)
         return True, None
+    finally:
+        # Don't wait for a next batch nobody will look at.
+        downloads.shutdown(wait=False, cancel_futures=True)
 
     # Neither the text nor any photo settles it: benefit of the doubt.
     return True, None

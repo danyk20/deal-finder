@@ -127,7 +127,7 @@ def test_adapter_error_is_isolated(session, monkeypatch):
 def test_adapter_bot_wall_keeps_partial_listings(session, monkeypatch):
     """An adapter that fails partway through a multi-item fetch should still contribute
     whatever it fetched before failing, via AdapterError.partial_listings, instead of
-    losing that run's work entirely -- see pipeline.py::_collect_listings."""
+    losing that run's work entirely -- see pipeline.py::_Run._searched."""
     from deal_finder import registry
     from deal_finder.adapters.base import AdapterError, BaseAdapter, Listing
 
@@ -287,3 +287,162 @@ def test_run_result_records_when_the_run_started(session):
     before = utcnow()
     res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
     assert before <= res.started_at <= utcnow()
+
+
+# --- concurrency: marketplaces searched at once, one shared pool of AI work ---
+
+
+def _tesla(marketplace, i, **kw):
+    from deal_finder.adapters.base import Listing
+
+    return Listing(
+        marketplace=marketplace, external_id=str(i), url=f"https://{marketplace}/{i}",
+        title=f"Tesla Model S {marketplace} {i}", price=30000 + i, attributes={"year": 2018}, **kw,
+    )
+
+
+def _adapter(key, search):
+    from deal_finder.adapters.base import BaseAdapter
+
+    cls = type(f"{key}Adapter", (BaseAdapter,), {
+        "key": key, "label": key, "supported_categories": {"car"},
+        "search": lambda self, query, settings=None: search(),
+    })
+    return cls()
+
+
+def _install(monkeypatch, **searches):
+    from deal_finder import registry
+
+    for key, search in searches.items():
+        monkeypatch.setitem(registry.ADAPTERS, key, _adapter(key, search))
+
+
+class _PassingAi:
+    """Answers every non-negotiables check with PASS; ``on_chat`` runs first."""
+
+    def __init__(self, on_chat=lambda: None):
+        self.on_chat = on_chat
+
+    def chat(self, messages, **kwargs):
+        self.on_chat()
+        return "PASS"
+
+
+def _with_non_negotiables(session, w):
+    w.filters = {**w.filters, "non_negotiables": "must have free supercharging"}
+    session.add(w)
+    session.commit()
+    return w
+
+
+def test_marketplaces_are_searched_at_the_same_time(session, monkeypatch):
+    both_searching = threading.Barrier(2, timeout=5)  # breaks if the searches run one by one
+
+    def search(name):
+        def run():
+            both_searching.wait()
+            return [_tesla(name, 1)]
+        return run
+
+    _install(monkeypatch, one=search("one"), two=search("two"))
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert res.adapter_status == {"one": "ok (1)", "two": "ok (1)"}
+    assert res.matched == 2
+
+
+def test_ai_checks_listings_while_slower_marketplaces_still_search(session, monkeypatch):
+    """The shared pool: the fast marketplace's listing is checked by the AI before the slow
+    marketplace finishes. Results still come out in the watch's marketplace order."""
+    ai_checked = threading.Event()
+
+    def slow():
+        assert ai_checked.wait(timeout=5), "the AI never started while this marketplace was searching"
+        return [_tesla("slow", 1)]
+
+    _install(monkeypatch, slow=slow, fast=lambda: [_tesla("fast", 1)])
+    w = _with_non_negotiables(session, _mk_watch(session, marketplaces=("slow", "fast")))
+    res = pipeline.run_watch(
+        session, w, settings=Settings(ai_enabled=True), notify=False, ignore_seen=True,
+        ai_client=_PassingAi(on_chat=ai_checked.set),
+    )
+    assert res.adapter_status == {"slow": "ok (1)", "fast": "ok (1)"}
+    assert [m["marketplace"] for m in res.matches_preview] == ["slow", "fast"]
+
+
+def test_ai_requests_run_in_parallel(session, monkeypatch):
+    three_at_once = threading.Barrier(3, timeout=5)
+
+    def chat():
+        try:
+            three_at_once.wait()
+        except threading.BrokenBarrierError:
+            raise AssertionError("the AI checks ran one by one")
+
+    _install(monkeypatch, one=lambda: [_tesla("one", i) for i in range(3)])
+    w = _with_non_negotiables(session, _mk_watch(session, marketplaces=("one",)))
+    res = pipeline.run_watch(
+        session, w, settings=Settings(ai_enabled=True, ai_parallel_requests=3), notify=False,
+        ignore_seen=True, ai_client=_PassingAi(on_chat=chat),
+    )
+    assert res.matched == 3 and res.rejected_preview == []
+
+
+def test_non_negotiables_failures_are_rejected(session, monkeypatch):
+    class Ai:
+        def chat(self, messages, **kwargs):
+            return "FAIL: no free supercharging" if "one 1" in messages[1]["content"] else "PASS"
+
+    _install(monkeypatch, one=lambda: [_tesla("one", 0), _tesla("one", 1)])
+    w = _with_non_negotiables(session, _mk_watch(session, marketplaces=("one",)))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=True), notify=False, ignore_seen=True, ai_client=Ai())
+    assert [m["external_id"] for m in res.matches_preview] == ["0"]
+    assert [(r["external_id"], r["reason"]) for r in res.rejected_preview] == [
+        ("1", "doesn't meet non-negotiables: no free supercharging")
+    ]
+
+
+def test_telegram_sends_matches_while_slower_marketplaces_still_search(session, monkeypatch):
+    first_sent = threading.Event()
+    sent = []
+
+    def send(settings, chat_id, match):
+        sent.append(match.listing.marketplace)
+        first_sent.set()
+
+    def slow():
+        assert first_sent.wait(timeout=5), "nothing was sent while this marketplace was searching"
+        return [_tesla("slow", 1)]
+
+    monkeypatch.setattr(pipeline, "send_telegram_match", send)
+    _install(monkeypatch, slow=slow, fast=lambda: [_tesla("fast", 1)])
+    w = _mk_telegram_watch(session, marketplaces=("slow", "fast"))
+    res = pipeline.run_watch(session, w, settings=Settings(seed_mode=False, ai_enabled=False, telegram_bot_token="T"))
+    assert sent == ["fast", "slow"]
+    assert res.notified == 2 and res.error is None
+    rows = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
+    assert len(rows) == 2
+
+
+def test_same_item_on_two_marketplaces_matches_once(session, monkeypatch):
+    from deal_finder.adapters.base import Listing
+
+    def copy(marketplace):
+        return lambda: [Listing(marketplace=marketplace, external_id="9", url=f"https://{marketplace}/9",
+                                title="Tesla Model S 90D", price=30000, attributes={"year": 2018})]
+
+    _install(monkeypatch, one=copy("one"), two=copy("two"))
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert res.found == 2 and res.matched == 1
+
+
+def test_email_matches_are_enriched_during_the_run_and_sent_in_order(session, monkeypatch):
+    sent = []
+    monkeypatch.setattr(pipeline, "send_match_email", lambda settings, to, subject, html: sent.append(html))
+    _install(monkeypatch, one=lambda: [_tesla("one", 1)], two=lambda: [_tesla("two", 1)])
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(seed_mode=False, ai_enabled=False, smtp_host="smtp.test"))
+    assert res.emailed is True and res.notified == 2
+    assert sent[0].index("Tesla Model S one 1") < sent[0].index("Tesla Model S two 1")

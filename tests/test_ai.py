@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import httpx
 import pytest
 
@@ -17,10 +19,12 @@ class StubClient:
         self.responses = list(responses)
         self.calls = 0
         self.messages: list[list[dict]] = []
+        self.kwargs: list[dict] = []
 
     def chat(self, messages, **kwargs):
         self.calls += 1
         self.messages.append(messages)
+        self.kwargs.append(kwargs)
         return self.responses.pop(0)
 
 
@@ -66,6 +70,20 @@ def test_translate_skips_when_source_matches_custom_target():
     client = StubClient([])
     assert translate_text(client, "Sehr gepflegt.", source_language="de", target_language="German") == "Sehr gepflegt."
     assert client.calls == 0
+
+
+def test_translate_asks_without_reasoning():
+    """With reasoning on, gemma4 took over 4 minutes per translation (live) -- past the
+    timeout, which drops the translation and every answer."""
+    client = StubClient(["Very well maintained."])
+    translate_text(client, "Sehr gepflegt.")
+    assert client.kwargs[0]["reasoning_effort"] == "none"
+
+
+def test_questions_ask_without_reasoning():
+    client = StubClient(["Good", "Fine"])
+    answer_questions(client, "desc", ["Condition?", "Pickup?"])
+    assert [k["reasoning_effort"] for k in client.kwargs] == ["none", "none"]
 
 
 def test_questions_one_call_per_question():
@@ -212,12 +230,53 @@ def test_check_non_negotiables_unknown_looks_at_photos_in_batches_of_3(monkeypat
     listing, fetched = _photos(monkeypatch, 7)
     client = StubClient(["UNKNOWN: the colour isn't stated", "UNKNOWN", "FAIL: the car is red"])
     assert check_non_negotiables(client, listing, "must be green") == (False, "the car is red")
-    assert [len(_image_parts(m)) for m in client.messages] == [0, 3, 3]  # stopped before the 7th
-    assert fetched == [f"https://x/photo{i}.jpg" for i in range(1, 7)]
+    assert [len(_image_parts(m)) for m in client.messages] == [0, 3, 3]  # never shown the 7th
+    # The 7th may have been downloading while the model looked at photos 4-6.
+    assert {f"https://x/photo{i}.jpg" for i in range(1, 7)} <= set(fetched) <= set(listing.image_urls)
     photo_call = client.messages[1][1]["content"]
     assert _image_parts(client.messages[1])[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
     text = next(p for p in photo_call if p.get("type") == "text")["text"]
     assert "must be green" in text and "NOT SETTLED BY THE TEXT: the colour isn't stated" in text
+
+
+def test_check_non_negotiables_skips_photos_when_they_cannot_tell(monkeypatch):
+    """Free supercharging, a service history or how the engine runs never show in a photo:
+    looking anyway cost up to 10 photo calls per listing, all answering UNKNOWN."""
+    listing, fetched = _photos(monkeypatch, 7)
+    client = StubClient(["UNKNOWN: free supercharging | PHOTOS: NO"])
+    assert check_non_negotiables(client, listing, "Must have free supercharging.") == (True, None)
+    assert client.calls == 1 and fetched == []
+
+
+def test_check_non_negotiables_looks_at_photos_when_they_can_tell(monkeypatch):
+    listing, _ = _photos(monkeypatch, 4)
+    client = StubClient(["UNKNOWN: colour | PHOTOS: YES", "FAIL: the car is red"])
+    assert check_non_negotiables(client, listing, "must be green") == (False, "the car is red")
+    text = next(p for p in client.messages[1][1]["content"] if p.get("type") == "text")["text"]
+    assert "NOT SETTLED BY THE TEXT: colour" in text and "PHOTOS" not in text
+
+
+def test_check_non_negotiables_downloads_next_photos_while_the_model_looks(monkeypatch):
+    listing, fetched = _photos(monkeypatch, 6)
+    fourth = threading.Event()
+    real_get = __import__("deal_finder.ai.dealbreakers", fromlist=["httpx"]).httpx.get
+
+    def get(url, **kw):
+        if url.endswith("photo4.jpg"):
+            fourth.set()
+        return real_get(url, **kw)
+
+    monkeypatch.setattr("deal_finder.ai.dealbreakers.httpx.get", get)
+    seen_during_first_photo_call = []
+
+    class Client(StubClient):
+        def chat(self, messages, **kwargs):
+            if self.calls == 1:  # the first photo call
+                seen_during_first_photo_call.append(fourth.wait(timeout=5))
+            return super().chat(messages, **kwargs)
+
+    check_non_negotiables(Client(["UNKNOWN: colour", "UNKNOWN", "PASS"]), listing, "must be green")
+    assert seen_during_first_photo_call == [True]
 
 
 def test_check_non_negotiables_photos_can_confirm(monkeypatch):

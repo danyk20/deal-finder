@@ -72,13 +72,31 @@ def test_listing_from_api_item_falls_back_to_thumbnail():
 # --- search() orchestration (monkeypatched third-party package) --------
 
 
+@pytest.fixture(autouse=True)
+def _fresh_facebook_state(monkeypatch):
+    """The adapter remembers city ids and the account's radius across searches; every
+    test starts with an empty memory and an account whose radius the page doesn't show."""
+    import deal_finder.adapters.facebook as fb
+
+    monkeypatch.setattr(fb, "_city_ids", {})
+    monkeypatch.setattr(fb, "_account_radius", None)
+    account["radius"] = None
+
+
 def _query(**params) -> MarketplaceQuery:
     return MarketplaceQuery(category="car", terms=["Tesla", "Model S"], params=params)
+
+
+# The fake Facebook account: its saved search radius, shown in the search page's data.
+account: dict = {"radius": None}
 
 
 class _FakePage:
     def close(self):
         pass
+
+    def content(self):
+        return f'{{"filter_radius_km":{account["radius"]}}}' if account["radius"] else "<html></html>"
 
 
 class _FakeContext:
@@ -125,10 +143,12 @@ def _install_fake(monkeypatch, *, search_result=None, visit_result=None, search_
     monkeypatch.setattr(fb_scraper_mod, "visit_all_listings", fake_visit_all_listings)
     # Never let a test reach the real account-radius dialog.
     radius_calls.clear()
-    monkeypatch.setattr(
-        fb_scraper_mod, "set_account_search_radius",
-        lambda page, radius_km, query, country="ch", **kw: radius_calls.append((radius_km, kw.get("location"))),
-    )
+
+    def fake_set_radius(page, radius_km, query, country="ch", **kw):
+        radius_calls.append((radius_km, kw.get("location")))
+        account["radius"] = fb_scraper_mod.supported_radius_km(radius_km)
+
+    monkeypatch.setattr(fb_scraper_mod, "set_account_search_radius", fake_set_radius)
     return fb_scraper_mod
 
 
@@ -369,3 +389,77 @@ def test_radius_change_failure_still_searches(monkeypatch):
     q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], radius_km=30)
     assert list(FacebookAdapter().search(q, Settings())) == []
     assert "min_price" in seen  # the search still ran
+
+
+def _count_searches(monkeypatch, fb_scraper_mod) -> list:
+    searches: list = []
+    monkeypatch.setattr(fb_scraper_mod, "search_all_listings", lambda page, q, **k: searches.append(k) or [])
+    return searches
+
+
+def test_city_is_looked_up_once(monkeypatch):
+    """The lookup types the city into Facebook's location dialog; a city's id never
+    changes, so later searches (any spelling case) reuse it."""
+    fb_scraper_mod = _install_fake(monkeypatch)
+    looked_up: list = []
+
+    def fake_lookup_city(page, city, country="ch"):
+        looked_up.append(city)
+        return "106015269434234", "Zürich, Switzerland"
+
+    monkeypatch.setattr(fb_scraper_mod, "lookup_city", fake_lookup_city)
+    searches = _count_searches(monkeypatch, fb_scraper_mod)
+    for city in ("Zurich", "zurich "):
+        list(FacebookAdapter().search(MarketplaceQuery(category="car", terms=["Mac"], location=city), Settings()))
+    assert looked_up == ["Zurich"]
+    assert [s["location"] for s in searches] == ["106015269434234", "106015269434234"]
+
+
+def test_unchanged_radius_is_not_set_again(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+    searches = _count_searches(monkeypatch, fb_scraper_mod)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], radius_km=30)
+    list(FacebookAdapter().search(q, Settings()))
+    list(FacebookAdapter().search(q, Settings()))
+    assert radius_calls == [(30, None)]  # the second search found the account still at 40 km
+    assert len(searches) == 2
+
+
+def test_radius_already_on_the_account_is_remembered(monkeypatch):
+    """The first search with a radius sets it (the scraper itself returns early when the
+    account already has it); the radius read back from the search page is what later
+    searches compare against."""
+    fb_scraper_mod = _install_fake(monkeypatch)
+    _count_searches(monkeypatch, fb_scraper_mod)
+    account["radius"] = 40
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], radius_km=40)
+    for _ in range(3):
+        list(FacebookAdapter().search(q, Settings()))
+    assert radius_calls == [(40, None)]
+
+
+def test_radius_changed_elsewhere_is_set_back_in_the_same_run(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+    searches = _count_searches(monkeypatch, fb_scraper_mod)
+    q = MarketplaceQuery(category="car", terms=["Mac", "Mini"], radius_km=30)
+    list(FacebookAdapter().search(q, Settings()))
+    account["radius"] = 250  # the user changed it in their own browser
+    list(FacebookAdapter().search(q, Settings()))
+    assert radius_calls == [(30, None), (30, None)]
+    assert len(searches) == 3  # searched again with the radius set back
+    assert account["radius"] == 40
+
+
+def test_failed_radius_change_is_not_retried_in_the_same_run(monkeypatch):
+    fb_scraper_mod = _install_fake(monkeypatch)
+    attempts: list = []
+
+    def fail(*a, **k):
+        attempts.append(1)
+        raise fb_scraper_mod.SearchRadiusError("dialog didn't offer 40 km")
+
+    monkeypatch.setattr(fb_scraper_mod, "set_account_search_radius", fail)
+    searches = _count_searches(monkeypatch, fb_scraper_mod)
+    account["radius"] = 250
+    list(FacebookAdapter().search(MarketplaceQuery(category="car", terms=["Mac"], radius_km=30), Settings()))
+    assert len(attempts) == 1 and len(searches) == 1

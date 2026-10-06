@@ -77,16 +77,29 @@ def filter_rejection_reason(
     if category_reason is not None:
         return category_reason
 
-    non_negotiables = (watch.filters or {}).get("non_negotiables", "").strip()
-    if non_negotiables and settings is not None and settings.ai_enabled:
-        client = ai_client or OllamaClient(
-            settings.ollama_base_url, settings.ollama_model, settings.ollama_timeout
-        )
-        ok, reason = check_non_negotiables(client, listing, non_negotiables)
-        if not ok:
-            return f"doesn't meet non-negotiables: {reason}"
+    return non_negotiables_rejection_reason(
+        listing, (watch.filters or {}).get("non_negotiables", ""), settings=settings, ai_client=ai_client
+    )
 
-    return None
+
+def non_negotiables_rejection_reason(
+    listing: Listing,
+    requirements: str,
+    *,
+    settings: Settings | None,
+    ai_client: OllamaClient | None = None,
+) -> str | None:
+    """Just the AI-checked "non-negotiables" filter (the last step of
+    ``filter_rejection_reason``), on its own so the pipeline can run the free checks right
+    away and queue only this slow one for its AI workers. Takes the requirements text
+    rather than the Watch, so it never touches a DB-bound object off the pipeline's
+    thread."""
+    requirements = (requirements or "").strip()
+    if not requirements or settings is None or not settings.ai_enabled:
+        return None
+    client = ai_client or OllamaClient(settings.ollama_base_url, settings.ollama_model, settings.ollama_timeout)
+    ok, reason = check_non_negotiables(client, listing, requirements)
+    return None if ok else f"doesn't meet non-negotiables: {reason}"
 
 
 def passes_filters(
@@ -95,15 +108,18 @@ def passes_filters(
     return filter_rejection_reason(listing, query, category, watch) is None
 
 
-def dedup_cross_marketplace(listings: list[Listing]) -> list[Listing]:
-    """Drop near-duplicates (same item listed on multiple marketplaces).
+def dedup_key(listing: Listing) -> tuple[str, int | None]:
+    """Heuristic "same item on another marketplace" key: lowercased title + rounded price."""
+    return listing.title.strip().lower(), int(listing.price) if listing.price is not None else None
 
-    Heuristic key: lowercased title + rounded price. Keeps the first occurrence.
-    """
+
+def dedup_cross_marketplace(listings: list[Listing]) -> list[Listing]:
+    """Drop near-duplicates (same item listed on multiple marketplaces), keeping the first
+    occurrence (see ``dedup_key``)."""
     seen: set[tuple[str, int | None]] = set()
     out: list[Listing] = []
     for li in listings:
-        key = (li.title.strip().lower(), int(li.price) if li.price is not None else None)
+        key = dedup_key(li)
         if key in seen:
             continue
         seen.add(key)

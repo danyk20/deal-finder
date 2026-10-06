@@ -67,6 +67,10 @@
       </select>
     </label>
   </div>
+  <div class="grid-2">
+    <label>Parallel AI requests{{ hint('How many AI requests a run sends to Ollama at once (checking non-negotiables, translating, answering questions). Above 1 only helps if Ollama itself runs with OLLAMA_NUM_PARALLEL above 1 -- and on an M2 Mac even then it made checks and answers slower. Leave it at 1 unless you measured that more helps on your machine.') }}
+      <input type="number" name="ai_parallel_requests" value="{{ values.ai_parallel_requests }}" min="1" placeholder="1"></label>
+  </div>
   <small class="muted">Run <code>ollama serve</code> and <code>ollama pull {{ values.ollama_model or 'gemma4:12b' }}</code>. Verify the tag with <code>ollama list</code>.</small>
 
   <h4>Behaviour</h4>

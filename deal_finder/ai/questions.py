@@ -48,9 +48,12 @@ def answer_questions(
         if on_progress:
             on_progress(i, total, question)
         user = f"LISTING DATA:\n{listing_text}\n\nQUESTION: {question}"
+        # No reasoning: with it on, one answer took over 4 minutes on gemma4 (live); without,
+        # 5-8s, and the answers were just as right.
         raw = client.chat(
             [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
             temperature=0.0,
+            reasoning_effort="none",
         )
         answers[question] = raw.strip() or "not stated"
     return answers

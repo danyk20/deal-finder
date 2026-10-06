@@ -18,12 +18,16 @@ Modes (controlled by flags):
 ``notify`` was named ``send_email`` before Telegram support was added; the query
 param/form field at the HTTP layer keeps that name for compatibility (see web/api.py,
 web/routes.py) and is simply mapped to ``notify=`` when calling into this module.
+
+Every marketplace is searched at the same time, and the AI works through the listings
+while the slower marketplaces are still scraping -- see ``_Run``.
 """
 
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -35,7 +39,7 @@ from .adapters.base import AdapterError, Listing
 from .ai import Enrichment, OllamaClient, enrich_listing
 from .config import Settings
 from .db import runtime_settings
-from .matching import dedup_cross_marketplace, filter_rejection_reason
+from .matching import dedup_key, filter_rejection_reason, non_negotiables_rejection_reason
 from .models import NotificationLog, SeenListing, Watch, utcnow
 from .notify import EmailMatch, TelegramMatch, open_listings, render_email
 from .notify import send_email as send_match_email
@@ -101,30 +105,19 @@ def _search_isolated(adapter, query, settings: Settings) -> list[Listing]:
     can leave the *calling* thread's asyncio state looking like a loop is still running,
     and the next adapter's own sync_playwright() call on that same thread then fails
     with "Playwright Sync API inside the asyncio loop" -- even though nothing here
-    actually uses asyncio. _collect_listings otherwise runs every adapter sequentially
-    on one thread (itself already off the app's event loop -- see run_watch's callers),
-    so one adapter's cleanup bug would corrupt every adapter after it in the same run.
-    A dedicated ThreadPoolExecutor per call guarantees each adapter gets a brand new
-    thread (and therefore clean asyncio thread-local state), and the old one is joined
-    and discarded before the next adapter starts.
+    actually uses asyncio. The run searches every marketplace at once from a thread pool
+    whose threads could in principle be reused, so one adapter's cleanup bug could
+    corrupt whichever adapter ran on that thread next. A dedicated ThreadPoolExecutor per
+    call guarantees each adapter gets a brand new thread (and therefore clean asyncio
+    thread-local state), joined and discarded once its search ends.
     """
     with ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(lambda: list(adapter.search(query, settings))).result()
 
 
-def _listing_progress(watch_id: int | None, idx: int, total: int, title: str, *, suffix: str = ""):
-    """Build an ``enrich_listing`` progress callback that reports "listing X/Y (title):
-    <AI step>" as the watch's live status, so the "Running watch…" overlay shows exactly
-    which listing and which question is in flight."""
-
-    def _cb(message: str) -> None:
-        progress.set_status(watch_id, f"Listing {idx}/{total} ({title}){suffix}: {message}")
-
-    return _cb
-
-
-def _collect_listings(watch: Watch, query, category, result: RunResult, settings: Settings) -> list[Listing]:
-    # Resolve which selected adapters actually run (known, supports category, enabled).
+def _plan(watch: Watch, result: RunResult, settings: Settings) -> list[tuple[str, object]]:
+    """The watch's selected adapters that actually run (known, support the watch's
+    category, enabled); the others get their reason in ``result.adapter_status``."""
     plan: list[tuple[str, object]] = []
     for key in watch.marketplaces or []:
         adapter = get_adapter(key)
@@ -137,30 +130,217 @@ def _collect_listings(watch: Watch, query, category, result: RunResult, settings
             result.adapter_status[key] = "disabled in settings"
         else:
             plan.append((key, adapter))
+    return plan
 
-    listings: list[Listing] = []
-    for key, adapter in plan:
-        progress.set_status(watch.id, f"Searching {getattr(adapter, 'label', key)}…")
+
+@dataclass
+class _Found:
+    """A listing plus where it came from -- (position of its marketplace in the watch,
+    position in that marketplace's results) -- so results can be put back in a stable
+    order however the concurrent searches and AI requests happened to finish."""
+
+    order: tuple[int, int]
+    listing: Listing
+
+
+def _in_order(found: list[_Found]) -> list[Listing]:
+    return [f.listing for f in sorted(found, key=lambda f: f.order)]
+
+
+class _Run:
+    """The concurrent part of a run. Every marketplace is searched at once, and each one's
+    listings go into one shared pool of AI work as soon as that marketplace finishes -- so
+    the AI checks tutti's listings while Ricardo and Facebook are still scraping. The pool
+    sends ``settings.ai_parallel_requests`` requests at once (default 1: one by one) --
+    non-negotiables checks and, for each new match about to be notified, translation +
+    Q&A. A Telegram match is sent the moment it's ready; email matches wait
+    for the one batch email at the end.
+
+    Only the calling thread touches the Watch (and nothing here touches the DB session);
+    worker threads get plain values and hand results back through futures.
+
+    A listing found on several marketplaces is still kept once, but now as whichever copy
+    passed its checks first rather than the one from the marketplace listed first.
+    """
+
+    def __init__(self, watch, query, category, settings, ai_client, result, *, seen_keys, deliver):
+        self.watch = watch
+        self.watch_id = watch.id
+        self.query = query
+        self.category = category
+        self.settings = settings
+        self.ai_client = ai_client
+        self.result = result
+        self.seen_keys = seen_keys
+        # Translate/answer (and on Telegram, send) new matches during the run -- off for
+        # seeding, dry runs and previews, which never notify.
+        self.deliver = deliver
+        self.telegram = (watch.notify_channel or "email") == "telegram"
+        self.chat_id = watch.telegram_chat_id
+        self.questions = list(watch.questions or [])
+        self.requirements = (watch.filters or {}).get("non_negotiables", "").strip() if settings.ai_enabled else ""
+
+        self.matched: list[_Found] = []
+        self.rejected: list[tuple[_Found, str]] = []
+        self.new: list[_Found] = []
+        self.delivering: list[_Found] = []  # new matches being enriched/sent, at most max_results_per_run
+        self.enriched: list[tuple[_Found, Enrichment]] = []  # email: ready for the batch email
+        self.sent: list[_Found] = []  # Telegram: delivered
+        self.send_error: str | None = None
+        self._match_keys: set = set()
+
+        self._pending: dict[Future, tuple] = {}  # future -> (handler, *handler args)
+        self._ai: ThreadPoolExecutor | None = None
+        # Live status, also updated from the worker threads.
+        self._lock = threading.Lock()
+        self._searching: dict[str, str] = {}
+        self._checks_queued = 0
+        self._checks_done = 0
+        self._activity = ""
+
+    def run(self, plan: list[tuple[str, object]]) -> None:
+        searches = ThreadPoolExecutor(max_workers=max(1, len(plan)), thread_name_prefix=f"search-{self.watch_id}")
+        self._ai = ThreadPoolExecutor(
+            max_workers=max(1, self.settings.ai_parallel_requests), thread_name_prefix=f"ai-{self.watch_id}"
+        )
         try:
-            found = _search_isolated(adapter, query, settings)
-            listings.extend(found)
-            result.adapter_status[key] = f"ok ({len(found)})"
+            for pos, (key, adapter) in enumerate(plan):
+                with self._lock:
+                    self._searching[key] = getattr(adapter, "label", key)
+                future = searches.submit(_search_isolated, adapter, self.query, self.settings)
+                self._pending[future] = (self._searched, pos, key)
+            self._publish()
+            while self._pending:
+                done, _ = wait(self._pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    handler, *args = self._pending.pop(future)
+                    if not future.cancelled():
+                        handler(future, *args)
+                self._publish()
+        finally:
+            # Everything is done by now, unless a handler raised: then don't wait for the rest.
+            searches.shutdown(wait=False, cancel_futures=True)
+            self._ai.shutdown(wait=False, cancel_futures=True)
+
+    # --- handlers (calling thread) ---
+
+    def _searched(self, future: Future, pos: int, key: str) -> None:
+        with self._lock:
+            self._searching.pop(key, None)
+        try:
+            found = future.result()
+            self.result.adapter_status[key] = f"ok ({len(found)})"
         except AdapterError as exc:
             # A partial-run error (e.g. a bot-wall hit partway through) may carry
             # whatever listings the adapter already fetched successfully before failing
             # (see AdapterError.partial_listings) -- keep those rather than discarding a
             # run's worth of successful work over one later failure.
-            partial = getattr(exc, "partial_listings", None)
-            if partial:
-                listings.extend(partial)
-                result.adapter_status[key] = f"partial ({len(partial)}): {exc}"
+            found = list(getattr(exc, "partial_listings", None) or [])
+            if found:
+                self.result.adapter_status[key] = f"partial ({len(found)}): {exc}"
             else:
-                result.adapter_status[key] = f"error: {exc}"
-            log.warning("adapter %s failed for watch %s: %s", key, watch.id, exc)
+                self.result.adapter_status[key] = f"error: {exc}"
+            log.warning("adapter %s failed for watch %s: %s", key, self.watch_id, exc)
         except Exception as exc:  # noqa: BLE001 - never let one adapter abort the run
-            result.adapter_status[key] = f"error: {exc!r}"
-            log.exception("adapter %s crashed for watch %s", key, watch.id)
-    return listings
+            found = []
+            self.result.adapter_status[key] = f"error: {exc!r}"
+            log.exception("adapter %s crashed for watch %s", key, self.watch_id)
+        self.result.found += len(found)
+
+        for i, li in enumerate(found):
+            item = _Found((pos, i), li)
+            # The free checks right away (no settings -> no AI); only the AI check is queued.
+            reason = filter_rejection_reason(li, self.query, self.category, self.watch)
+            if reason is not None:
+                self.rejected.append((item, reason))
+            elif self.requirements:
+                self._checks_queued += 1
+                self._submit(self._check, item, then=self._checked)
+            else:
+                self._matched(item)
+
+    def _checked(self, future: Future, item: _Found) -> None:
+        self._checks_done += 1
+        reason = future.result()
+        if reason is None:
+            self._matched(item)
+        else:
+            self.rejected.append((item, reason))
+
+    def _matched(self, item: _Found) -> None:
+        key = dedup_key(item.listing)
+        if key in self._match_keys:
+            return  # the same item from another marketplace already matched
+        self._match_keys.add(key)
+        self.matched.append(item)
+        li = item.listing
+        if (li.marketplace, li.external_id) in self.seen_keys:
+            return
+        self.new.append(item)
+        if self.deliver and self.send_error is None and len(self.delivering) < self.settings.max_results_per_run:
+            self.delivering.append(item)
+            self._submit(self._enrich, item, then=self._enriched)
+
+    def _enriched(self, future: Future, item: _Found) -> None:
+        enrichment = future.result()
+        if not self.telegram:
+            self.enriched.append((item, enrichment))
+            return
+        if self.send_error is not None:
+            return
+        match = TelegramMatch(listing=item.listing, enrichment=enrichment, questions=self.questions)
+        try:
+            send_telegram_match(self.settings, self.chat_id, match)
+        except Exception as exc:  # noqa: BLE001 - TelegramNotConfigured, TelegramApiError, etc.
+            # Almost always systemic (bad token/chat id, rate limit): stop sending, and
+            # leave this match and every later one unseen for the next run to retry.
+            self.send_error = str(exc)
+            log.warning("telegram send failed for watch %s: %s", self.watch_id, exc)
+            for pending, (handler, *_) in self._pending.items():
+                if handler == self._enriched:
+                    pending.cancel()
+            return
+        self.sent.append(item)
+
+    # --- AI work (worker threads) ---
+
+    def _submit(self, job, item: _Found, *, then) -> None:
+        self._pending[self._ai.submit(job, item.listing)] = (then, item)
+
+    def _check(self, li: Listing) -> str | None:
+        self._set_activity(f"{li.title}: checking non-negotiables")
+        return non_negotiables_rejection_reason(li, self.requirements, settings=self.settings, ai_client=self.ai_client)
+
+    def _enrich(self, li: Listing) -> Enrichment:
+        return _safe_enrich(
+            self.settings, li, self.questions, self.ai_client,
+            on_progress=lambda message: self._set_activity(f"{li.title}: {message}"),
+        )
+
+    # --- live status (shown by the web UI's "Running watch…" overlay) ---
+
+    def _set_activity(self, message: str) -> None:
+        with self._lock:
+            self._activity = message
+        self._publish()
+
+    def _publish(self) -> None:
+        with self._lock:
+            parts = []
+            if self._searching:
+                parts.append(f"Searching {', '.join(self._searching.values())}…")
+            if self._checks_queued:
+                parts.append(f"checked {self._checks_done}/{self._checks_queued} against non-negotiables")
+            if self.delivering:
+                if self.telegram:
+                    parts.append(f"sent {len(self.sent)}/{len(self.delivering)} via Telegram")
+                else:
+                    parts.append(f"prepared {len(self.enriched)}/{len(self.delivering)} for the email")
+            if self._activity:
+                parts.append(self._activity)
+            text = " · ".join(parts)
+        if text:
+            progress.set_status(self.watch_id, text[0].upper() + text[1:])
 
 
 def run_watch(
@@ -215,33 +395,10 @@ def _run_watch(
         session, watch, settings, ai_client=ai_client, persist=record,
         on_status=lambda msg: progress.set_status(watch.id, msg),
     )
-    listings = _collect_listings(watch, query, category, result, settings)
-    result.found = len(listings)
 
-    progress.set_status(watch.id, f"Found {result.found} listing(s); filtering & deduping…")
-    matched: list[Listing] = []
-    rejected: list[tuple[Listing, str]] = []
-    has_non_negotiables = bool((watch.filters or {}).get("non_negotiables", "").strip())
-    for idx, li in enumerate(listings, start=1):
-        if has_non_negotiables:
-            progress.set_status(
-                watch.id, f"Checking listing {idx}/{len(listings)} ({li.title}) against non-negotiables…"
-            )
-        reason = filter_rejection_reason(li, query, category, watch, settings=settings, ai_client=ai_client)
-        if reason is None:
-            matched.append(li)
-        else:
-            rejected.append((li, reason))
-    matched = dedup_cross_marketplace(matched)
-    result.matched = len(matched)
-    result.matches_preview = [listing_to_dict(li) for li in matched[:50]]
-    result.rejected_preview = [
-        {**listing_to_dict(li), "reason": reason} for li, reason in rejected[:50]
-    ]
-
-    # Which are new (not previously seen for this watch)?
+    # Which listings were already seen (notified, or recorded by seeding) for this watch?
     if ignore_seen:
-        new = matched
+        seen_keys: set[tuple[str, str]] = set()
     else:
         seen_keys = {
             (row.marketplace, row.external_id)
@@ -249,11 +406,25 @@ def _run_watch(
                 select(SeenListing).where(SeenListing.watch_id == watch.id)
             ).all()
         }
-        new = [li for li in matched if (li.marketplace, li.external_id) not in seen_keys]
+    is_seed = record and settings.seed_mode and not watch.seed_done
+
+    run = _Run(
+        watch, query, category, settings, ai_client, result,
+        seen_keys=seen_keys, deliver=notify and not dry_run and not is_seed,
+    )
+    run.run(_plan(watch, result, settings))
+
+    matched = _in_order(run.matched)
+    result.matched = len(matched)
+    result.matches_preview = [listing_to_dict(li) for li in matched[:50]]
+    result.rejected_preview = [
+        {**listing_to_dict(f.listing), "reason": reason}
+        for f, reason in sorted(run.rejected, key=lambda r: r[0].order)[:50]
+    ]
+    new = _in_order(run.new)
     result.new = len(new)
 
     # Seeding run: record existing matches as seen, do not email.
-    is_seed = record and settings.seed_mode and not watch.seed_done
     if is_seed:
         progress.set_status(watch.id, f"First run: recording {len(matched)} existing listing(s) as seen…")
         for li in matched:
@@ -290,28 +461,19 @@ def _run_watch(
     channel = watch.notify_channel or "email"
     result.channel = channel
     if channel == "telegram":
-        _send_via_telegram(session, watch, new, settings, ai_client, result, record)
+        _finish_telegram(session, watch, run, result, record)
     else:
-        _send_via_email(session, watch, new, settings, ai_client, result, record)
+        _send_email(session, watch, run, settings, result, record)
     return result
 
 
-def _send_via_email(session, watch, new, settings, ai_client, result, record) -> None:
+def _send_email(session, watch, run: _Run, settings, result, record) -> None:
     """One HTML email covering the whole batch -- all-or-nothing per run, same as before
-    Telegram support existed."""
-    total = len(new)
-    email_matches = []
-    for idx, li in enumerate(new, start=1):
-        email_matches.append(
-            EmailMatch(
-                listing=li,
-                enrichment=_safe_enrich(
-                    settings, li, watch.questions, ai_client,
-                    on_progress=_listing_progress(watch.id, idx, total, li.title),
-                ),
-                questions=watch.questions or [],
-            )
-        )
+    Telegram support existed. Its matches were translated/answered during the run."""
+    email_matches = [
+        EmailMatch(listing=f.listing, enrichment=enrichment, questions=watch.questions or [])
+        for f, enrichment in sorted(run.enriched, key=lambda e: e[0].order)
+    ]
     subject, html = render_email(watch, email_matches)
     progress.set_status(watch.id, "Sending email…")
     try:
@@ -319,8 +481,8 @@ def _send_via_email(session, watch, new, settings, ai_client, result, record) ->
         result.emailed = True
         result.notified = len(email_matches)
         if record:
-            for li in new:
-                _record_seen(session, watch, li, notified=True)
+            for m in email_matches:
+                _record_seen(session, watch, m.listing, notified=True)
             _log_notification(session, watch, subject, len(email_matches), True, None, channel="email")
         _finish(session, watch, f"emailed {len(email_matches)}", record)
     except Exception as exc:  # noqa: BLE001 - EmailNotConfigured, SMTP/OS errors, etc.
@@ -332,36 +494,20 @@ def _send_via_email(session, watch, new, settings, ai_client, result, record) ->
         _finish(session, watch, result.error, record)
 
 
-def _send_via_telegram(session, watch, new, settings, ai_client, result, record) -> None:
-    """One Telegram message PER LISTING (unlike email's single batch document). Each
-    listing is marked seen as soon as its own send succeeds, so a mid-batch failure never
-    causes already-delivered listings to be re-sent on retry. Stops at the first failure
-    (almost always systemic -- bad token/chat id, rate limit -- not per-listing; the one
-    per-listing failure mode, an unfetchable photo, is already absorbed inside
-    send_telegram_match's own photo->text fallback) and leaves that listing plus every
-    remaining one unseen, to be retried on the next scheduled run."""
-    sent = 0
-    error: str | None = None
-    total = len(new)
-    for idx, li in enumerate(new, start=1):
-        match = TelegramMatch(
-            listing=li,
-            enrichment=_safe_enrich(
-                settings, li, watch.questions, ai_client,
-                on_progress=_listing_progress(watch.id, idx, total, li.title, suffix=" (Telegram)"),
-            ),
-            questions=watch.questions or [],
-        )
-        try:
-            send_telegram_match(settings, watch.telegram_chat_id, match)
-        except Exception as exc:  # noqa: BLE001 - TelegramNotConfigured, TelegramApiError, etc.
-            error = str(exc)
-            log.warning("telegram send failed for watch %s: %s", watch.id, exc)
-            break
-        sent += 1
-        if record:
-            _record_seen(session, watch, li, notified=True)
-
+def _finish_telegram(session, watch, run: _Run, result, record) -> None:
+    """Telegram sends one message PER LISTING (unlike email's single batch document), each
+    as soon as it's ready during the run (see _Run._enriched). Each delivered listing is
+    marked seen, so a mid-batch failure never causes already-delivered listings to be
+    re-sent on retry. Sending stops at the first failure (almost always systemic -- bad
+    token/chat id, rate limit -- not per-listing; the one per-listing failure mode, an
+    unfetchable photo, is already absorbed inside send_telegram_match's own photo->text
+    fallback) and leaves that listing plus every remaining one unseen, to be retried on
+    the next scheduled run."""
+    sent = len(run.sent)
+    error = run.send_error
+    if record:
+        for f in run.sent:
+            _record_seen(session, watch, f.listing, notified=True)
     result.emailed = sent > 0
     result.notified = sent
     if error:

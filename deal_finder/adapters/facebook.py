@@ -41,6 +41,16 @@ from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.facebook")
 
+# Facebook location id per (city, country), looked up once per app run: the lookup types the
+# name into Marketplace's location dialog (a page load, a 2.5s settle, typing), and a city's
+# id doesn't change.
+_city_ids: dict[tuple[str, str], str] = {}
+# The radius last seen on the account (km, as Facebook offers it), so a run whose watch
+# radius matches skips the check -- a page load plus a 2.5s settle before the search even
+# starts. It's read back from the search page after every search, so a change made in the
+# user's own browser is noticed, and undone in the same run.
+_account_radius: int | None = None
+
 
 def _images(item: dict) -> list[str]:
     images = item.get("images")
@@ -100,6 +110,7 @@ class FacebookAdapter(BaseAdapter):
     status_note = "⚠ automated FB use risks account bans; needs a one-time login"
 
     def search(self, query: MarketplaceQuery, settings: Settings | None = None) -> Iterable[Listing]:
+        global _account_radius
         text = (query.text or " ".join(query.terms)).strip()
         if not text:
             raise AdapterError("Facebook Marketplace: no search text set on the watch")
@@ -112,9 +123,11 @@ class FacebookAdapter(BaseAdapter):
                 MarketplaceConsentRequiredError,
                 PlaywrightError,
                 SearchRadiusError,
+                account_search_radius,
                 search_all_listings,
                 lookup_city,
                 set_account_search_radius,
+                supported_radius_km,
                 visit_all_listings,
             )
         except ImportError as exc:
@@ -146,17 +159,24 @@ class FacebookAdapter(BaseAdapter):
                     if city.isdigit():
                         location = city  # already a Facebook location id
                     elif city:
-                        location, _place = lookup_city(page, city, "ch")
+                        location = _city_ids.get((city.casefold(), "ch"))
+                        if location is None:
+                            location, _place = lookup_city(page, city, "ch")
+                            _city_ids[(city.casefold(), "ch")] = location
                     # The radius is different: Facebook ignores any radius in the URL and
                     # only honours the one saved on the account, so a watch radius CHANGES
                     # the user's real Marketplace setting (and it stays changed after the
                     # run). Any number works: the scraper (0.4.1+) rounds it up to a radius
                     # Facebook offers (30 -> 40 km, above 500 -> 500). No watch radius -> the
                     # account setting is left alone.
-                    radius = query.radius_km
-                    if radius is not None and radius > 0:
+                    radius = query.radius_km if query.radius_km is not None and query.radius_km > 0 else None
+                    wanted = supported_radius_km(radius) if radius is not None else None
+
+                    def set_radius() -> None:
+                        global _account_radius
                         try:
                             set_account_search_radius(page, radius, text, "ch", verbose=False, location=location)
+                            _account_radius = wanted
                         except (SearchRadiusError, PlaywrightError) as exc:
                             # Same fallback as fb_scraper.scrape(): search anyway, with the
                             # account's current radius, rather than failing the whole run.
@@ -165,21 +185,40 @@ class FacebookAdapter(BaseAdapter):
                                 "the account's current radius instead.",
                                 radius, str(exc).splitlines()[0] if str(exc) else type(exc).__name__,
                             )
-                    # No year/mileage here (removed in 0.4.0): Facebook applies them only to
-                    # listings with structured vehicle data and silently drops the rest (e.g.
-                    # a 2017 Model X whose year is only in its title). They're enforced after
-                    # the detail fetch instead, by CarCategory.post_match_reason() on the
-                    # year/km parsed from title + description. search_all_listings re-searches
-                    # in price halves when Facebook cuts a big result set off early.
-                    candidates = search_all_listings(
-                        page,
-                        text,
-                        country="ch",
-                        min_price=int(query.price_min) if query.price_min is not None else None,
-                        max_price=int(query.price_max) if query.price_max is not None else None,
-                        location=location,
-                        verbose=False,
-                    )
+
+                    def search():
+                        # No year/mileage here (removed in 0.4.0): Facebook applies them only
+                        # to listings with structured vehicle data and silently drops the rest
+                        # (e.g. a 2017 Model X whose year is only in its title). They're
+                        # enforced after the detail fetch instead, by
+                        # CarCategory.post_match_reason() on the year/km parsed from title +
+                        # description. search_all_listings re-searches in price halves when
+                        # Facebook cuts a big result set off early.
+                        return search_all_listings(
+                            page,
+                            text,
+                            country="ch",
+                            min_price=int(query.price_min) if query.price_min is not None else None,
+                            max_price=int(query.price_max) if query.price_max is not None else None,
+                            location=location,
+                            verbose=False,
+                        )
+
+                    set_now = wanted is not None and wanted != _account_radius
+                    if set_now:
+                        set_radius()
+                    candidates = search()
+                    seen = account_search_radius(page) if wanted is not None else None
+                    if seen is not None:
+                        _account_radius = seen
+                        if seen != wanted and not set_now:
+                            # Changed in the user's own browser since the last run looked.
+                            log.info(
+                                "Facebook: the account's search radius is %d km now, not %d km; changing it back.",
+                                seen, wanted,
+                            )
+                            set_radius()
+                            candidates = search()
                     # Facebook's radius search can spill just over the border.
                     candidates = [c for c in candidates if c.get("is_local", True)]
                     # Cap the (slower, one-request-per-listing) detail phase.

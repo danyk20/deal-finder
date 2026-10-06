@@ -105,7 +105,7 @@ class AdapterError(Exception):
     (e.g. a bot-wall hit after some listings' details were already retrieved) attach
     whatever it already collected, so the pipeline keeps those results instead of
     discarding a run's worth of successful work over one later failure -- see
-    pipeline.py's _collect_listings.
+    pipeline.py's _Run._searched.
     """
 
     def __init__(self, message: str, *, partial_listings: list | None = None):
