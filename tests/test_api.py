@@ -256,3 +256,13 @@ def test_saving_the_form_unchanged_doesnt_rerun_the_ai(client, monkeypatch):
     changed = [(k, "Mac Studio" if k == "sp_query" else v) for k, v in unchanged]
     _post_form(client, f"/watches/{wid}", changed)
     assert started == [f"site-categories-{wid}"]
+
+
+def test_run_now_shows_when_the_run_started(client):
+    import re
+
+    wid = client.post("/api/watches", json={"name": "Demo", "marketplaces": ["demo"],
+                                            "search_params": {"make": "Tesla", "model": "Model S"}}).json()["id"]
+    page = client.post(f"/watches/{wid}/run-now").text
+    assert re.search(r"started \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z+\-\d]+<", page)  # local time + zone
+    assert re.match(r"\d{4}-\d{2}-\d{2}T", client.post(f"/api/watches/{wid}/run-now").json()["started_at"])

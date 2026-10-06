@@ -31,7 +31,9 @@ _MIN_INTERVAL_SECONDS = 60  # be polite to marketplaces
 def get_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is None:
-        _scheduler = AsyncIOScheduler(timezone="UTC")
+        # The machine's local time zone (APScheduler's default): cron expressions mean
+        # local time, matching the local times the web UI shows.
+        _scheduler = AsyncIOScheduler()
     return _scheduler
 
 
@@ -51,7 +53,7 @@ def parse_interval(value: str) -> int:
 
 def build_trigger(kind: str, value: str):
     if kind == "cron":
-        return CronTrigger.from_crontab(value, timezone="UTC")
+        return CronTrigger.from_crontab(value)  # local time zone, like the scheduler
     return IntervalTrigger(seconds=parse_interval(value))
 
 

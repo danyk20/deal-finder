@@ -90,7 +90,7 @@
     </label>
     <label>Value
       <input type="text" name="schedule_value" value="{{ watch.schedule_value if watch else '1d' }}" placeholder="15m / 2h / 1d / 1w  or  0 8 * * *">
-      <small class="muted">Interval: 15m, 2h, 1d, 1w (min 60s). Cron: 5 fields, e.g. <code>0 8 * * *</code> = daily 08:00 UTC.</small>
+      <small class="muted">Interval: 15m, 2h, 1d, 1w (min 60s). Cron: 5 fields, in local time, e.g. <code>0 8 * * *</code> = daily 08:00.</small>
     </label>
   </div>
 

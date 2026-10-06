@@ -7,7 +7,7 @@
   </h2>
   <p class="muted">{{ category.label if category else w.category }}: {{ search_text }} ·
     {{ w.schedule_kind }} <code>{{ w.schedule_value }}</code> ·
-    next run: {{ next_run.strftime('%Y-%m-%d %H:%M UTC') if next_run else '—' }}</p>
+    next run: {{ next_run | localtime }}</p>
   {% if site_categories %}
   <p class="muted">Searched category:
     {% if site_categories.pending %}<strong>not picked yet</strong> (the AI picks it in the background after saving; all categories until then)
@@ -96,7 +96,8 @@
 
 {% if run_result %}
 <article style="margin-top:1rem;">
-  <header><strong>Run result (test)</strong></header>
+  <header><strong>Run result (test)</strong>{% if run_result.started_at %}
+    <small class="muted"> · started {{ run_result.started_at | localtime('%Y-%m-%d %H:%M:%S') }}</small>{% endif %}</header>
   <p>Found {{ run_result.found }} · matched {{ run_result.matched }} · new {{ run_result.new }}
      {% if run_result.emailed %}· ✅ emailed {{ run_result.notified }}{% endif %}
      {% if run_result.dry_run %}· 🌐 opened {{ run_result.opened }} tab(s) in your browser{% endif %}
@@ -139,7 +140,7 @@
   <tbody>
   {% for m in matches %}
     <tr>
-      <td><small>{{ m.first_seen_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+      <td><small>{{ m.first_seen_at | localtime }}</small></td>
       <td><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title }}</a></td>
       <td>{{ "%.0f"|format(m.price) if m.price else '—' }}</td>
       <td>{{ m.marketplace }}</td>
@@ -177,7 +178,7 @@
   <tbody>
   {% for l in logs %}
     <tr>
-      <td><small>{{ l.sent_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+      <td><small>{{ l.sent_at | localtime }}</small></td>
       <td><small>{{ l.email_to }}</small></td><td><small>{{ l.subject }}</small></td>
       <td>{{ l.num_matches }}</td>
       <td>{% if l.success %}✅{% else %}❌ <small class="muted">{{ l.error }}</small>{% endif %}</td>

@@ -18,10 +18,12 @@ from ..progress import get_status
 from ..registry import get_category, list_adapters, list_categories
 from ..scheduler import next_run_time
 from ..site_categories import category_adapters, effective_id, form_choices, stale_keys
+from ..util import localtime
 from .. import service
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.filters["localtime"] = localtime  # every timestamp on the pages, in local time
 
 
 def _get_watch_or_404(session: Session, watch_id: int) -> Watch:

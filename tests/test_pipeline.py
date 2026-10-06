@@ -278,3 +278,12 @@ def test_dry_run_takes_precedence_over_notify(session, monkeypatch):
     res = pipeline.run_watch(session, w, settings=s, notify=True, dry_run=True, ignore_seen=True)
     assert res.dry_run is True and res.emailed is False
     assert sent == [] and len(opened) > 0
+
+
+def test_run_result_records_when_the_run_started(session):
+    from deal_finder.models import utcnow
+
+    w = _mk_watch(session)
+    before = utcnow()
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert before <= res.started_at <= utcnow()

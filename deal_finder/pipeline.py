@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlmodel import Session, select
@@ -62,6 +63,7 @@ def listing_to_dict(li: Listing) -> dict[str, Any]:
 @dataclass
 class RunResult:
     watch_id: int | None
+    started_at: datetime | None = None  # naive UTC (see models.utcnow), set as the run begins
     found: int = 0
     matched: int = 0
     new: int = 0
@@ -192,8 +194,9 @@ def _run_watch(
     dry_run: bool = False,
     ai_client: OllamaClient | None = None,
 ) -> RunResult:
+    started_at = utcnow()  # first thing, so it marks when the run began
     settings = settings or runtime_settings(session)
-    result = RunResult(watch_id=watch.id)
+    result = RunResult(watch_id=watch.id, started_at=started_at)
     # dry_run is always a pure preview: never write to the DB, regardless of ignore_seen.
     record = (not ignore_seen) and not dry_run
 
