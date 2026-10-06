@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deal-finder"
-version = "0.1.0"
+version = "0.1.1"
 description = "Periodically scan second-hand marketplaces for specific items, enrich with a local LLM, and email matches."
 requires-python = ">=3.13"
 dependencies = [

@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
         shutdown_scheduler()
 
 
-app = FastAPI(title="Deal Finder", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Deal Finder", version="0.1.1", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(web_router)
 
