@@ -19,12 +19,10 @@ Login is effectively required (anonymous Marketplace search now hard-redirects t
     Less safe (may trigger 2FA/checkpoints); the package raises a clear error rather
     than hanging if that happens.
 
-Session storage caveat: the package keeps its persistent Chrome profile (and therefore
-the logged-in session) inside its own installed package directory
-(`<venv>/lib/.../site-packages/browser_profile/`), not inside deal_finder's own
-`~/.deal_finder/profiles/`. That means a `pipenv sync` / dependency reinstall wipes the
-login and `fb_login` needs to be run again - this is a limitation of the package as
-published, not something this adapter works around.
+Session storage: the package keeps its persistent Chrome profile (and therefore the
+logged-in session) in `~/.fb_scraper/browser_profile/` (override with
+FB_SCRAPER_PROFILE_DIR), not in deal_finder's own `~/.deal_finder/profiles/`. It's
+outside the virtualenv, so a `pipenv sync` / package upgrade keeps the login.
 
 Optional dependency: install with `pipenv install --categories facebook` (or
 `pip install facebook-marketplace-scraper`); imported lazily so the rest of the app

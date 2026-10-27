@@ -64,7 +64,11 @@ dependencies = [
 # rest of the core dependencies -- autouncle-scraper above now needs that floor too.)
 # >=0.2.0 pins playwright==1.60.0 (was ~=1.61), matching ricardo-scraper's exact pin --
 # 0.1.0 conflicted with ricardo-scraper and couldn't be installed alongside it.
-facebook = ["facebook-marketplace-scraper>=0.4.1"]
+# >=0.4.4: before 0.4.2, a listing page with "Ad" and "Related searches" sections came
+# back with no description and an advertiser's name as its location, so the AI judged
+# e.g. a phone case by its title "Google Pixel 10Pro Fold" alone; 0.4.3 reads details
+# from Facebook's embedded page data instead of the page layout.
+facebook = ["facebook-marketplace-scraper>=0.4.4"]
 dev = [
     "pytest>=8",
     "respx>=0.21",

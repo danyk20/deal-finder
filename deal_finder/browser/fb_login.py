@@ -4,9 +4,9 @@ you can log in yourself (handles 2FA, and Marketplace's data-use consent screen 
 appears); the session then persists in that package's own browser profile and later
 scans reuse it automatically — no password is stored by Deal Finder.
 
-Note: the session is stored inside the installed package's own directory (see
-fb_scraper.browser.PROFILE_DIR), not in deal_finder's ~/.deal_finder/profiles/ — a
-`pipenv sync` / dependency reinstall wipes it, and this needs to be run again after that.
+Note: the session is stored in ~/.fb_scraper/browser_profile/ (see
+fb_scraper.browser.PROFILE_DIR), not in deal_finder's ~/.deal_finder/profiles/ — it's
+outside the virtualenv, so a `pipenv sync` / package upgrade keeps it.
 
 Run:  python -m deal_finder.browser.fb_login
 """

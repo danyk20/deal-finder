@@ -274,12 +274,12 @@
         },
         "facebook-marketplace-scraper": {
             "hashes": [
-                "sha256:409f5f2547e0bf682239717bfdd81adf75e0c5db5c3cd03f9685258fbebcdcf3",
-                "sha256:7f591032aaea6643b9fc4437d64e88ada2469c293de2148802697e0267f3088a"
+                "sha256:2c384e4435ed0e88bfc222cf5705c185efab227cc29dae6867ab61a6f277ed8f",
+                "sha256:d8907a03c61bdd86e2becac4ca96f8aea0693cffbaeeaec6f91e593896004a2e"
             ],
             "index": "pypi",
             "markers": "python_version >= '3.13'",
-            "version": "==0.4.1"
+            "version": "==0.4.4"
         },
         "fastapi": {
             "hashes": [
@@ -1289,11 +1289,11 @@
         },
         "soupsieve": {
             "hashes": [
-                "sha256:49e9380d7d2905463583bafe285e818c7366a9ed7b3aee221c1ac79c905d8bc0",
-                "sha256:8596eb8967d744174820280fa62b4542a2e955bfaccca73ed8a13c6eb8e9b502"
+                "sha256:8412826614f9c632227067d0985aeb9f584bd15efc852955430e097a9fe7afbf",
+                "sha256:924fab84ae21604c19e175e1f39815eb6fa83ba23836e09e9de180925e5bc4c0"
             ],
-            "markers": "python_version >= '3.10'",
-            "version": "==2.10"
+            "markers": "python_full_version >= '3.11.5'",
+            "version": "==3.0.4"
         },
         "sqlalchemy": {
             "hashes": [
