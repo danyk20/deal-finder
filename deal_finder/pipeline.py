@@ -37,6 +37,7 @@ from sqlmodel import Session, select
 from . import progress, site_categories
 from .adapters.base import AdapterError, Listing
 from .ai import Enrichment, OllamaClient, enrich_listing
+from .categories.fields import non_negotiables_use_photos
 from .config import Settings
 from .db import runtime_settings
 from .matching import dedup_key, filter_rejection_reason, non_negotiables_rejection_reason
@@ -179,6 +180,7 @@ class _Run:
         self.chat_id = watch.telegram_chat_id
         self.questions = list(watch.questions or [])
         self.requirements = (watch.filters or {}).get("non_negotiables", "").strip() if settings.ai_enabled else ""
+        self.use_photos = non_negotiables_use_photos(watch.filters or {})
 
         self.matched: list[_Found] = []
         self.rejected: list[tuple[_Found, str]] = []
@@ -309,7 +311,9 @@ class _Run:
 
     def _check(self, li: Listing) -> str | None:
         self._set_activity(f"{li.title}: checking non-negotiables")
-        return non_negotiables_rejection_reason(li, self.requirements, settings=self.settings, ai_client=self.ai_client)
+        return non_negotiables_rejection_reason(
+            li, self.requirements, settings=self.settings, ai_client=self.ai_client, use_photos=self.use_photos
+        )
 
     def _enrich(self, li: Listing) -> Enrichment:
         return _safe_enrich(

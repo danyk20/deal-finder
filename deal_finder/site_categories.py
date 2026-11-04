@@ -50,7 +50,7 @@ from .registry import get_adapter, get_category
 log = logging.getLogger("deal_finder.site_categories")
 
 # Watch fields that say nothing about WHAT the item is -- left out of the AI's description.
-_NOT_ABOUT_THE_ITEM = {"location", "radius_km"}
+_NOT_ABOUT_THE_ITEM = {"location", "radius_km", "non_negotiables_photos"}
 # Part of every fingerprint: bump it when the stored pick's shape or the way it's picked
 # changes, so picks stored by older code are redone (2: added the ranked "candidates";
 # 3: one fingerprint per marketplace instead of one for all of them).

@@ -258,6 +258,34 @@ def test_saving_the_form_unchanged_doesnt_rerun_the_ai(client, monkeypatch):
     assert started == [f"site-categories-{wid}"]
 
 
+def test_use_photos_switch_round_trips_through_the_form(client):
+    """Ticked for a new watch; a browser doesn't submit an unticked box, which must be
+    stored as off rather than read back as the default (on). Not something the AI's
+    category pick is based on."""
+    from deal_finder import site_categories
+    from deal_finder.db import session_scope
+    from deal_finder.models import Watch
+
+    box = 'name="f_non_negotiables_photos"'
+    new = client.get("/watches/new?watch_type=general").text
+    assert "checked" in _tag(new, box)
+    form = [(k, v) for k, v in _browser_submission(new) if k not in ("name", "sp_query", "f_non_negotiables_photos")]
+    form += [("name", "Mac Mini"), ("sp_query", "Mac Mini"), ("marketplaces", "tutti")]
+    wid = int(_post_form(client, "/watches", form).headers["location"].rsplit("/", 1)[1])
+    with session_scope() as s:
+        w = s.get(Watch, wid)
+        assert w.filters["non_negotiables_photos"] == "false"
+        described = site_categories.describe_watch(w)
+    assert "checked" not in _tag(client.get(f"/watches/{wid}/edit").text, box)
+
+    _post_form(client, f"/watches/{wid}", form + [("f_non_negotiables_photos", "true")])
+    with session_scope() as s:
+        w = s.get(Watch, wid)
+        assert w.filters["non_negotiables_photos"] == "true"
+        assert site_categories.describe_watch(w) == described
+    assert "checked" in _tag(client.get(f"/watches/{wid}/edit").text, box)
+
+
 def test_run_now_shows_when_the_run_started(client):
     import re
 

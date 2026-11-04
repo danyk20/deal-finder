@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 
+import pytest
 from sqlmodel import select
 
 from deal_finder import pipeline
@@ -401,6 +402,33 @@ def test_non_negotiables_failures_are_rejected(session, monkeypatch):
     assert [(r["external_id"], r["reason"]) for r in res.rejected_preview] == [
         ("1", "doesn't meet non-negotiables: no free supercharging")
     ]
+
+
+@pytest.mark.parametrize("use_photos, rejected", [
+    ("true", [("1", "doesn't meet non-negotiables: from photo 1: no supercharger card visible")]),
+    ("false", []),
+])
+def test_non_negotiables_use_photos_only_when_the_watch_says_so(session, monkeypatch, use_photos, rejected):
+    class Ai:
+        def chat(self, messages, **kwargs):
+            if isinstance(messages[1]["content"], str):
+                return "UNKNOWN: free supercharging"
+            return "FAIL: no supercharger card visible"
+
+    class Photo:
+        content, headers = b"jpeg", {"content-type": "image/jpeg"}
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr("deal_finder.ai.dealbreakers.httpx.get", lambda url, **kw: Photo())
+    _install(monkeypatch, one=lambda: [_tesla("one", 1, image_urls=["https://one/1.jpg"])])
+    w = _mk_watch(session, marketplaces=("one",))
+    w.filters = {**w.filters, "non_negotiables_photos": use_photos}
+    w = _with_non_negotiables(session, w)
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=True), notify=False, ignore_seen=True, ai_client=Ai())
+    assert [(r["external_id"], r["reason"]) for r in res.rejected_preview] == rejected
+    assert res.matched == (0 if rejected else 1)
 
 
 def test_telegram_sends_matches_while_slower_marketplaces_still_search(session, monkeypatch):

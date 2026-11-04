@@ -27,6 +27,14 @@ def to_float(value: Any) -> float | None:
         return None
 
 
+def to_bool(value: Any, default: bool = True) -> bool:
+    """A switch's stored value: "true"/"false" from the form, or a real bool from the JSON
+    API. Missing or blank -> ``default``."""
+    if value is None or value == "":
+        return default
+    return str(value).strip().lower() not in ("false", "0", "off", "no")
+
+
 def to_int(value: Any) -> int | None:
     f = to_float(value)
     return int(f) if f is not None else None

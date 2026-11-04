@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import httpx
+
 from deal_finder.adapters.base import Listing
 from deal_finder.ai.client import AiUnavailable
 from deal_finder.categories.car import CarCategory
@@ -141,6 +143,28 @@ def test_non_negotiables_fails_open_when_ai_unavailable():
     assert filter_rejection_reason(
         _listing(), q, CAT, w, settings=Settings(ai_enabled=True), ai_client=RaisingAiClient()
     ) is None
+
+
+def test_non_negotiables_photos_follow_the_watch_switch(monkeypatch):
+    fetched = []
+
+    def get(url, **kw):
+        fetched.append(url)
+        raise httpx.HTTPError("offline")  # a photo that doesn't download is just skipped
+
+    monkeypatch.setattr("deal_finder.ai.dealbreakers.httpx.get", get)
+    listing = _listing(image_urls=["https://x/1.jpg"])
+    w = _watch(filters={"non_negotiables": "must be green", "non_negotiables_photos": "false"})
+    client = StubAiClient(["UNKNOWN: colour"])
+    assert filter_rejection_reason(
+        listing, CAT.build_query(w), CAT, w, settings=Settings(ai_enabled=True), ai_client=client
+    ) is None
+    assert client.calls == 1 and fetched == []
+
+    w = _watch(filters={"non_negotiables": "must be green"})  # never set: on
+    client = StubAiClient(["UNKNOWN: colour"])
+    filter_rejection_reason(listing, CAT.build_query(w), CAT, w, settings=Settings(ai_enabled=True), ai_client=client)
+    assert fetched == ["https://x/1.jpg"]
 
 
 def test_non_negotiables_never_called_when_a_cheap_filter_already_failed():

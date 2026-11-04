@@ -18,12 +18,13 @@ from ..progress import get_status
 from ..registry import get_category, list_adapters, list_categories
 from ..scheduler import next_run_time
 from ..site_categories import category_adapters, effective_id, form_choices, stale_keys
-from ..util import localtime
+from ..util import localtime, to_bool
 from .. import service
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["localtime"] = localtime  # every timestamp on the pages, in local time
+templates.env.filters["to_bool"] = to_bool  # a checkbox field's stored value
 
 
 def _get_watch_or_404(session: Session, watch_id: int) -> Watch:
@@ -45,7 +46,13 @@ def _parse_watch_form(form) -> dict:
             filters[key[2:]] = form.get(key)
         elif key.startswith("sitecat_"):
             site_choices[key[8:]] = form.get(key)
-    questions = [q.strip() for q in form.get("questions", "").splitlines() if q.strip()]
+    # A browser doesn't submit an unticked box at all: store it as "false", not as missing
+    # (which reads as the field's default).
+    category = get_category(form.get("category", "car"))
+    for f in category.filter_fields if category else []:
+        if f.kind == "checkbox":
+            filters[f.name] = "true" if f"f_{f.name}" in form else "false"
+    questions =[q.strip() for q in form.get("questions", "").splitlines() if q.strip()]
     data = {
         "name": form.get("name", "").strip() or "Untitled watch",
         "category": form.get("category", "car"),

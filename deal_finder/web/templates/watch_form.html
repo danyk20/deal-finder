@@ -58,15 +58,23 @@
   <h4>Filters</h4>
   <div class="grid-2">
     {% for f in category.filter_fields %}
+    {% set value = watch.filters.get(f.name, f.default) if watch else f.default %}
+    {% if f.kind == 'checkbox' %}
+    <label class="check-row" style="grid-column: 1 / -1; margin-bottom: var(--pico-spacing);">
+      <span class="check-row-main"><input type="checkbox" name="f_{{ f.name }}" value="true" {{ 'checked' if value|to_bool else '' }}> {{ f.label }}</span>
+      {% if f.help %}<small class="check-row-hint">{{ f.help }}</small>{% endif %}
+    </label>
+    {% else %}
     <label{% if f.kind == 'textarea' %} style="grid-column: 1 / -1;"{% endif %}>{{ f.label }}
       {% if f.kind == 'textarea' %}
-      <textarea name="f_{{ f.name }}" rows="3" placeholder="{{ f.placeholder }}">{{ (watch.filters.get(f.name, f.default) if watch else f.default) }}</textarea>
+      <textarea name="f_{{ f.name }}" rows="3" placeholder="{{ f.placeholder }}">{{ value }}</textarea>
       {% else %}
       <input type="{{ 'number' if f.kind == 'number' else 'text' }}" name="f_{{ f.name }}"
-             value="{{ (watch.filters.get(f.name, f.default) if watch else f.default) }}" placeholder="{{ f.placeholder }}">
+             value="{{ value }}" placeholder="{{ f.placeholder }}">
       {% endif %}
       {% if f.help %}<small class="muted">{{ f.help }}</small>{% endif %}
     </label>
+    {% endif %}
     {% endfor %}
   </div>
 
