@@ -68,7 +68,9 @@ dependencies = [
 # back with no description and an advertiser's name as its location, so the AI judged
 # e.g. a phone case by its title "Google Pixel 10Pro Fold" alone; 0.4.3 reads details
 # from Facebook's embedded page data instead of the page layout.
-facebook = ["facebook-marketplace-scraper>=0.4.4"]
+# >=0.4.5: opening the "Change location" dialog (a watch's city or radius) is retried once;
+# before, one slow dialog failed the whole Facebook search with "Locator.click: Timeout".
+facebook = ["facebook-marketplace-scraper>=0.4.5"]
 dev = [
     "pytest>=8",
     "respx>=0.21",
