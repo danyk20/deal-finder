@@ -24,7 +24,7 @@ class FieldDef:
 
     name: str
     label: str
-    kind: str = "text"  # text | number | textarea | checkbox ("true"/"false")
+    kind: str = "text"  # text | number | textarea | requirements (a box each, see fields.non_negotiables)
     placeholder: str = ""
     help: str = ""
     options: list[str] = field(default_factory=list)

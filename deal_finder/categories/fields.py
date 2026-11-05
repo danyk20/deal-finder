@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..ai.dealbreakers import Requirement
 from ..util import csv_list, to_bool, to_float, to_int
 from .base import FieldDef
 
@@ -42,40 +43,40 @@ KEYWORD_AND_AI_FIELDS = [
         "Must NOT contain (comma-separated)",
         help="Listing is skipped if any of these words appear.",
     ),
+    # The label is part of what the AI's marketplace-category pick is based on (see
+    # site_categories.describe_watch): changing it redoes every watch's pick.
     FieldDef(
         "non_negotiables",
         "Non-negotiables (checked by AI)",
-        kind="textarea",
+        kind="requirements",
         default="Item is currently working.",
-        placeholder="One per line, e.g.\nmust be green\nno visible rust or accident damage\nengine currently starts and runs",
+        placeholder="e.g. no visible rust or accident damage",
         help=(
-            "Free-text must-haves, ONE PER LINE. The AI checks each line on its own "
-            "against each listing's full data and description, and filters out a listing "
-            "as soon as one line clearly fails. A listing is only rejected when it clearly "
-            "contradicts a requirement; ambiguous/unmentioned details are not held against "
-            "it. Leave blank to disable. Costs about one AI call per line for each listing "
-            "that already passed every other filter."
-        ),
-    ),
-    FieldDef(
-        "non_negotiables_photos",
-        "Use photos",
-        kind="checkbox",
-        default="true",
-        help=(
-            "The text always comes first. A line the text doesn't settle is then checked "
-            "against the listing's photos, 3 per AI call (~10-20 s each), until one call "
-            "settles it -- e.g. the colour, visible damage, or specs printed on the box. "
-            "A listing rejected this way says which photos showed it. Off: a line the text "
-            "doesn't settle is given the benefit of the doubt."
+            "One must-have per box. The AI checks each on its own against each listing's "
+            "full data and description, and filters out a listing as soon as one clearly "
+            "fails; details a listing doesn't mention are never held against it. With "
+            "\"Use photos\", a box the text doesn't settle is then checked against the "
+            "listing's photos, 3 per AI call (~10-40 s each), until one call settles it -- "
+            "e.g. the colour, visible damage, or specs printed on the box; a listing "
+            "rejected that way says which photos showed it. Leave every box empty to "
+            "disable. Costs about one AI call per box for each listing that already "
+            "passed every other filter."
         ),
     ),
 ]
 
 
-def non_negotiables_use_photos(filters: dict[str, Any]) -> bool:
-    """The watch's "use photos" switch for its non-negotiables -- on unless turned off."""
-    return to_bool(filters.get("non_negotiables_photos"))
+def non_negotiables(filters: dict[str, Any], name: str = "non_negotiables") -> list[Requirement]:
+    """A watch's non-negotiables, one per box: (text as typed, use photos). Before they had
+    a box each they were one text, a line each, with one "use photos" switch for all of
+    them (``<name>_photos``, on unless turned off) -- still read that way until re-saved."""
+    value = filters.get(name)
+    if isinstance(value, list):
+        rows = [r for r in value if isinstance(r, dict)]
+        return [Requirement(str(r.get("text") or ""), to_bool(r.get("photos"))) for r in rows
+                if str(r.get("text") or "").strip()]
+    use_photos = to_bool(filters.get(f"{name}_photos"))
+    return [Requirement(line, use_photos) for line in str(value or "").splitlines() if line.strip()]
 
 
 def common_query_kwargs(filters: dict[str, Any]) -> dict[str, Any]:

@@ -13,11 +13,9 @@ from .fields import ITEM_CATEGORY, KEYWORD_AND_AI_FIELDS, LOCATION_FIELDS, PRICE
 
 
 def _with_item_placeholder(field: FieldDef) -> FieldDef:
-    # The shared non-negotiables example is about cars ("engine currently starts").
+    # The shared non-negotiables example is about cars ("no visible rust").
     if field.name == "non_negotiables":
-        return dataclasses.replace(
-            field, placeholder="One per line, e.g.\nat least 32 GB RAM\nApple M1 or newer\nno visible damage\noriginal box"
-        )
+        return dataclasses.replace(field, placeholder="e.g. at least 32 GB RAM")
     return field
 
 

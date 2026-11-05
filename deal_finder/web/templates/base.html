@@ -31,6 +31,14 @@
     .check-row input[type="checkbox"] { margin:0; flex-shrink:0; }
     .check-row-hint { display:block; margin:.15rem 0 0 1.7rem; color:var(--pico-muted-color); font-size:.85em; }
 
+    /* Watch form: one non-negotiable per row -- its text, "Use photos", remove. */
+    .requirement-row { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem .75rem; }
+    .requirement-row input[type="text"] { flex:1 1 14rem; margin:0; }
+    .requirement-controls { display:flex; align-items:center; gap:.75rem; }  /* wrap under the text together */
+    .requirement-row label { display:flex; align-items:center; gap:.4rem; margin:0; white-space:nowrap; cursor:pointer; }
+    .requirement-row input[type="checkbox"] { margin:0; }
+    .requirement-row button, [data-requirements] [data-add] { width:auto; margin:0; padding:.3rem .7rem; }
+
     /* A small card for grouping a primary action with the checkboxes that modify it. */
     .panel { margin-top:.75rem; padding:1rem 1.1rem; max-width:26rem;
              background:var(--pico-code-background-color); border:1px solid var(--pico-muted-border-color);

@@ -258,32 +258,59 @@ def test_saving_the_form_unchanged_doesnt_rerun_the_ai(client, monkeypatch):
     assert started == [f"site-categories-{wid}"]
 
 
-def test_use_photos_switch_round_trips_through_the_form(client):
-    """Ticked for a new watch; a browser doesn't submit an unticked box, which must be
-    stored as off rather than read back as the default (on). Not something the AI's
-    category pick is based on."""
+def test_non_negotiables_get_a_box_each_with_its_own_use_photos(client):
+    """Numbered boxes, since a browser doesn't submit an unticked "Use photos" at all:
+    the number ties it to its text. Empty boxes are dropped; gaps in the numbers (a box
+    removed in between) don't matter."""
+    from deal_finder.db import session_scope
+    from deal_finder.models import Watch
+
+    new = client.get("/watches/new?watch_type=general").text
+    assert 'value="Item is currently working."' in _tag(new, 'name="non_negotiables_text_0"')
+    assert "checked" in _tag(new, 'name="non_negotiables_photos_0"')
+    form = [(k, v) for k, v in _browser_submission(new) if not k.startswith(("name", "sp_query", "non_negotiables_"))]
+    form += [("name", "Mac Mini"), ("sp_query", "Mac Mini"), ("marketplaces", "tutti"),
+             ("non_negotiables_text_0", "> 31 GB RAM"), ("non_negotiables_photos_0", "true"),
+             ("non_negotiables_text_2", "seller joined before 2026"),  # "Use photos" unticked
+             ("non_negotiables_text_3", "  "), ("non_negotiables_photos_3", "true")]
+    wid = int(_post_form(client, "/watches", form).headers["location"].rsplit("/", 1)[1])
+    with session_scope() as s:
+        assert s.get(Watch, wid).filters["non_negotiables"] == [
+            {"text": "> 31 GB RAM", "photos": True}, {"text": "seller joined before 2026", "photos": False}]
+
+    edit = client.get(f"/watches/{wid}/edit").text
+    assert 'value="seller joined before 2026"' in _tag(edit, 'name="non_negotiables_text_1"')
+    assert "checked" in _tag(edit, 'name="non_negotiables_photos_0"')
+    assert "checked" not in _tag(edit, 'name="non_negotiables_photos_1"')
+    assert 'name="non_negotiables_text_2"' not in edit
+
+
+def test_non_negotiables_saved_as_one_text_open_as_a_box_per_line(client):
+    """Watches saved before each requirement had a box: one text, a line each, and one
+    "use photos" switch for all. Re-saving one unchanged keeps what the AI's category pick
+    is based on, so it isn't redone."""
     from deal_finder import site_categories
     from deal_finder.db import session_scope
     from deal_finder.models import Watch
 
-    box = 'name="f_non_negotiables_photos"'
-    new = client.get("/watches/new?watch_type=general").text
-    assert "checked" in _tag(new, box)
-    form = [(k, v) for k, v in _browser_submission(new) if k not in ("name", "sp_query", "f_non_negotiables_photos")]
-    form += [("name", "Mac Mini"), ("sp_query", "Mac Mini"), ("marketplaces", "tutti")]
-    wid = int(_post_form(client, "/watches", form).headers["location"].rsplit("/", 1)[1])
+    wid = client.post("/api/watches", json={
+        "name": "Mac Mini", "category": "general", "marketplaces": ["tutti"], "search_params": {"query": "Mac Mini"},
+        "filters": {"non_negotiables": "> 31 GB RAM \nM1 or newer chip", "non_negotiables_photos": "false"},
+    }).json()["id"]
     with session_scope() as s:
-        w = s.get(Watch, wid)
-        assert w.filters["non_negotiables_photos"] == "false"
-        described = site_categories.describe_watch(w)
-    assert "checked" not in _tag(client.get(f"/watches/{wid}/edit").text, box)
+        described = site_categories.describe_watch(s.get(Watch, wid))
 
-    _post_form(client, f"/watches/{wid}", form + [("f_non_negotiables_photos", "true")])
+    edit = client.get(f"/watches/{wid}/edit").text
+    assert 'value="&gt; 31 GB RAM "' in _tag(edit, 'name="non_negotiables_text_0"')
+    assert 'value="M1 or newer chip"' in _tag(edit, 'name="non_negotiables_text_1"')
+    assert "checked" not in _tag(edit, 'name="non_negotiables_photos_0"')
+    assert _post_form(client, f"/watches/{wid}", _browser_submission(edit)).status_code == 303
     with session_scope() as s:
         w = s.get(Watch, wid)
-        assert w.filters["non_negotiables_photos"] == "true"
+        assert w.filters["non_negotiables"] == [
+            {"text": "> 31 GB RAM ", "photos": False}, {"text": "M1 or newer chip", "photos": False}]
+        assert "non_negotiables_photos" not in w.filters
         assert site_categories.describe_watch(w) == described
-    assert "checked" in _tag(client.get(f"/watches/{wid}/edit").text, box)
 
 
 def test_run_now_shows_when_the_run_started(client):

@@ -10,9 +10,9 @@ import re
 
 from .adapters.base import Listing, MarketplaceQuery
 from .ai.client import OllamaClient
-from .ai.dealbreakers import check_non_negotiables
+from .ai.dealbreakers import Requirement, check_non_negotiables
 from .categories.base import BaseCategory
-from .categories.fields import non_negotiables_use_photos
+from .categories.fields import non_negotiables
 from .config import Settings
 from .models import Watch
 
@@ -78,31 +78,27 @@ def filter_rejection_reason(
     if category_reason is not None:
         return category_reason
 
-    filters = watch.filters or {}
     return non_negotiables_rejection_reason(
-        listing, filters.get("non_negotiables", ""), settings=settings, ai_client=ai_client,
-        use_photos=non_negotiables_use_photos(filters),
+        listing, non_negotiables(watch.filters or {}), settings=settings, ai_client=ai_client
     )
 
 
 def non_negotiables_rejection_reason(
     listing: Listing,
-    requirements: str,
+    requirements: list[Requirement],
     *,
     settings: Settings | None,
     ai_client: OllamaClient | None = None,
-    use_photos: bool = True,
 ) -> str | None:
     """Just the AI-checked "non-negotiables" filter (the last step of
     ``filter_rejection_reason``), on its own so the pipeline can run the free checks right
-    away and queue only this slow one for its AI workers. Takes the requirements text
-    rather than the Watch, so it never touches a DB-bound object off the pipeline's
-    thread."""
-    requirements = (requirements or "").strip()
+    away and queue only this slow one for its AI workers. Takes the requirements (see
+    categories.fields.non_negotiables) rather than the Watch, so it never touches a
+    DB-bound object off the pipeline's thread."""
     if not requirements or settings is None or not settings.ai_enabled:
         return None
     client = ai_client or OllamaClient(settings.ollama_base_url, settings.ollama_model, settings.ollama_timeout)
-    ok, reason = check_non_negotiables(client, listing, requirements, use_photos=use_photos)
+    ok, reason = check_non_negotiables(client, listing, requirements)
     return None if ok else f"doesn't meet non-negotiables: {reason}"
 
 

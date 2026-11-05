@@ -42,6 +42,7 @@ from sqlmodel import Session, select
 from .adapters.base import BaseAdapter, SiteCategory
 from .ai.category import rank_site_categories
 from .ai.client import AiUnavailable, OllamaClient
+from .categories.fields import non_negotiables
 from .config import Settings
 from .db import runtime_settings, session_scope
 from .models import Watch
@@ -50,7 +51,7 @@ from .registry import get_adapter, get_category
 log = logging.getLogger("deal_finder.site_categories")
 
 # Watch fields that say nothing about WHAT the item is -- left out of the AI's description.
-_NOT_ABOUT_THE_ITEM = {"location", "radius_km", "non_negotiables_photos"}
+_NOT_ABOUT_THE_ITEM = {"location", "radius_km", "non_negotiables_photos"}  # the last: watches saved before the per-box switch
 # Part of every fingerprint: bump it when the stored pick's shape or the way it's picked
 # changes, so picks stored by older code are redone (2: added the ranked "candidates";
 # 3: one fingerprint per marketplace instead of one for all of them).
@@ -71,7 +72,12 @@ def describe_watch(watch: Watch) -> str:
     if category is not None:
         fields = [(f, sp) for f in category.search_param_fields] + [(f, filters) for f in category.filter_fields]
         for f, values in fields:
-            value = str(values.get(f.name) or "").strip()
+            value = values.get(f.name)
+            if f.kind == "requirements" and isinstance(value, list):
+                # One per box, joined the way they were stored before they had a box each
+                # (one per line), so re-saving one of those watches doesn't redo its pick.
+                value = "\n".join(r.text for r in non_negotiables(values, f.name))
+            value = str(value or "").strip()
             if value and f.name not in _NOT_ABOUT_THE_ITEM:
                 lines.append(f"{f.label}: {value}")
     else:

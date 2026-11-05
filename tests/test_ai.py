@@ -8,7 +8,7 @@ import pytest
 from deal_finder.adapters.base import Listing
 from deal_finder.ai import enrich_listing
 from deal_finder.ai.client import AiUnavailable
-from deal_finder.ai.dealbreakers import check_non_negotiables
+from deal_finder.ai.dealbreakers import Requirement, check_non_negotiables
 from deal_finder.ai.questions import answer_questions
 from deal_finder.ai.translate import translate_text
 from deal_finder.config import Settings
@@ -240,12 +240,21 @@ def test_check_non_negotiables_unknown_looks_at_photos_in_batches_of_3(monkeypat
 
 
 def test_check_non_negotiables_without_photos_the_text_is_final(monkeypatch):
-    """The watch's "use photos" switch off: a line the text leaves open passes, and no
-    photo is even downloaded."""
+    """A requirement's "use photos" off: the text leaving it open passes it, and no photo
+    is even downloaded."""
     listing, fetched = _photos(monkeypatch, 7)
     client = StubClient(["UNKNOWN: colour"])
-    assert check_non_negotiables(client, listing, "must be green", use_photos=False) == (True, None)
+    assert check_non_negotiables(client, listing, [Requirement("must be green", use_photos=False)]) == (True, None)
     assert client.calls == 1 and fetched == []
+
+
+def test_check_non_negotiables_photos_only_for_the_requirements_that_may_use_them(monkeypatch):
+    listing, _ = _photos(monkeypatch, 3)
+    client = StubClient(["UNKNOWN: colour", "UNKNOWN: rust", "FAIL: rust on the sills"])
+    requirements = [Requirement("must be green", use_photos=False), Requirement("no visible rust")]
+    assert check_non_negotiables(client, listing, requirements) == (False, "from photos 1–3: rust on the sills")
+    assert [len(_image_parts(m)) for m in client.messages] == [0, 0, 3]
+    assert "no visible rust" in _user_text(client.messages[2]) and "green" not in _user_text(client.messages[2])
 
 
 def test_check_non_negotiables_with_photos_every_open_line_gets_them(monkeypatch):

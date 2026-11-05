@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 
 import httpx
+import pytest
 
 from deal_finder.adapters.base import Listing
 from deal_finder.ai.client import AiUnavailable
+from deal_finder.ai.dealbreakers import Requirement
 from deal_finder.categories.car import CarCategory
+from deal_finder.categories.fields import non_negotiables
 from deal_finder.config import Settings
 from deal_finder.matching import dedup_cross_marketplace, filter_rejection_reason, passes_filters
 from deal_finder.models import Watch
@@ -145,7 +148,14 @@ def test_non_negotiables_fails_open_when_ai_unavailable():
     ) is None
 
 
-def test_non_negotiables_photos_follow_the_watch_switch(monkeypatch):
+@pytest.mark.parametrize("filters, photos_used", [
+    ({"non_negotiables": [{"text": "must be green", "photos": False}]}, False),
+    ({"non_negotiables": [{"text": "must be green", "photos": True}]}, True),
+    # Saved before each box had its own switch: one text, one switch for every line.
+    ({"non_negotiables": "must be green", "non_negotiables_photos": "false"}, False),
+    ({"non_negotiables": "must be green"}, True),  # saved before there was any switch
+])
+def test_non_negotiables_photos_follow_each_requirements_switch(monkeypatch, filters, photos_used):
     fetched = []
 
     def get(url, **kw):
@@ -153,18 +163,22 @@ def test_non_negotiables_photos_follow_the_watch_switch(monkeypatch):
         raise httpx.HTTPError("offline")  # a photo that doesn't download is just skipped
 
     monkeypatch.setattr("deal_finder.ai.dealbreakers.httpx.get", get)
-    listing = _listing(image_urls=["https://x/1.jpg"])
-    w = _watch(filters={"non_negotiables": "must be green", "non_negotiables_photos": "false"})
+    w = _watch(filters=filters)
     client = StubAiClient(["UNKNOWN: colour"])
     assert filter_rejection_reason(
-        listing, CAT.build_query(w), CAT, w, settings=Settings(ai_enabled=True), ai_client=client
+        _listing(image_urls=["https://x/1.jpg"]), CAT.build_query(w), CAT, w,
+        settings=Settings(ai_enabled=True), ai_client=client,
     ) is None
-    assert client.calls == 1 and fetched == []
+    assert client.calls == 1 and fetched == (["https://x/1.jpg"] if photos_used else [])
 
-    w = _watch(filters={"non_negotiables": "must be green"})  # never set: on
-    client = StubAiClient(["UNKNOWN: colour"])
-    filter_rejection_reason(listing, CAT.build_query(w), CAT, w, settings=Settings(ai_enabled=True), ai_client=client)
-    assert fetched == ["https://x/1.jpg"]
+
+def test_non_negotiables_read_from_either_format():
+    assert non_negotiables({"non_negotiables": [{"text": "green", "photos": False}, {"text": " ", "photos": True},
+                                                {"text": "no rust", "photos": True}]}) == [
+        Requirement("green", False), Requirement("no rust", True)]
+    assert non_negotiables({"non_negotiables": "green\n\n no rust ", "non_negotiables_photos": "false"}) == [
+        Requirement("green", False), Requirement(" no rust ", False)]
+    assert non_negotiables({}) == []
 
 
 def test_non_negotiables_never_called_when_a_cheap_filter_already_failed():

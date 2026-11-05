@@ -405,10 +405,10 @@ def test_non_negotiables_failures_are_rejected(session, monkeypatch):
 
 
 @pytest.mark.parametrize("use_photos, rejected", [
-    ("true", [("1", "doesn't meet non-negotiables: from photo 1: no supercharger card visible")]),
-    ("false", []),
+    (True, [("1", "doesn't meet non-negotiables: from photo 1: no supercharger card visible")]),
+    (False, []),
 ])
-def test_non_negotiables_use_photos_only_when_the_watch_says_so(session, monkeypatch, use_photos, rejected):
+def test_non_negotiables_use_photos_only_when_the_requirement_says_so(session, monkeypatch, use_photos, rejected):
     class Ai:
         def chat(self, messages, **kwargs):
             if isinstance(messages[1]["content"], str):
@@ -424,8 +424,9 @@ def test_non_negotiables_use_photos_only_when_the_watch_says_so(session, monkeyp
     monkeypatch.setattr("deal_finder.ai.dealbreakers.httpx.get", lambda url, **kw: Photo())
     _install(monkeypatch, one=lambda: [_tesla("one", 1, image_urls=["https://one/1.jpg"])])
     w = _mk_watch(session, marketplaces=("one",))
-    w.filters = {**w.filters, "non_negotiables_photos": use_photos}
-    w = _with_non_negotiables(session, w)
+    w.filters = {**w.filters, "non_negotiables": [{"text": "must have free supercharging", "photos": use_photos}]}
+    session.add(w)
+    session.commit()
     res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=True), notify=False, ignore_seen=True, ai_client=Ai())
     assert [(r["external_id"], r["reason"]) for r in res.rejected_preview] == rejected
     assert res.matched == (0 if rejected else 1)

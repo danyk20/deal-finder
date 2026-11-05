@@ -59,11 +59,36 @@
   <div class="grid-2">
     {% for f in category.filter_fields %}
     {% set value = watch.filters.get(f.name, f.default) if watch else f.default %}
-    {% if f.kind == 'checkbox' %}
-    <label class="check-row" style="grid-column: 1 / -1; margin-bottom: var(--pico-spacing);">
-      <span class="check-row-main"><input type="checkbox" name="f_{{ f.name }}" value="true" {{ 'checked' if value|to_bool else '' }}> {{ f.label }}</span>
-      {% if f.help %}<small class="check-row-hint">{{ f.help }}</small>{% endif %}
-    </label>
+    {% if f.kind == 'requirements' %}
+    {# A box per requirement with its own "Use photos"; rows are added/removed by the script
+       at the end. Numbered names: an unticked box isn't submitted, so the number ties it
+       to its text. #}
+    {% set rows = non_negotiables(watch.filters if watch else {f.name: f.default}, f.name) %}
+    <fieldset style="grid-column: 1 / -1;" data-requirements>
+      <legend>{{ f.label }}</legend>
+      <div data-rows style="display:grid; gap:.5rem; margin-bottom:.5rem;">
+        {% for r in rows %}
+        <div class="requirement-row">
+          <input type="text" name="{{ f.name }}_text_{{ loop.index0 }}" value="{{ r.text }}" placeholder="{{ f.placeholder }}" aria-label="Non-negotiable">
+          <span class="requirement-controls">
+            <label><input type="checkbox" name="{{ f.name }}_photos_{{ loop.index0 }}" value="true" {{ 'checked' if r.use_photos else '' }}> Use photos</label>
+            <button type="button" class="secondary outline" data-remove aria-label="Remove this non-negotiable">✕</button>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      <template>
+        <div class="requirement-row">
+          <input type="text" name="{{ f.name }}_text___i__" placeholder="{{ f.placeholder }}" aria-label="Non-negotiable">
+          <span class="requirement-controls">
+            <label><input type="checkbox" name="{{ f.name }}_photos___i__" value="true" checked> Use photos</label>
+            <button type="button" class="secondary outline" data-remove aria-label="Remove this non-negotiable">✕</button>
+          </span>
+        </div>
+      </template>
+      <button type="button" class="secondary outline" data-add data-next="{{ rows|length }}">+ Add a non-negotiable</button>
+      {% if f.help %}<small class="muted" style="display:block; margin-top:.5rem;">{{ f.help }}</small>{% endif %}
+    </fieldset>
     {% else %}
     <label{% if f.kind == 'textarea' %} style="grid-column: 1 / -1;"{% endif %}>{{ f.label }}
       {% if f.kind == 'textarea' %}
@@ -167,5 +192,28 @@
     boxes.forEach(function (b) { b.addEventListener('change', update); });
     update();
   })();
+
+  // Non-negotiables: add a box (with "Use photos" ticked) or remove one. A new box gets
+  // the next unused number; gaps left by removed ones don't matter.
+  document.querySelectorAll('[data-requirements]').forEach(function (box) {
+    var rows = box.querySelector('[data-rows]');
+    var add = box.querySelector('[data-add]');
+    var next = Number(add.dataset.next);
+    function changed() { box.dispatchEvent(new Event('input', { bubbles: true })); }  // counts as an unsaved change
+    add.addEventListener('click', function () {
+      var row = box.querySelector('template').content.firstElementChild.cloneNode(true);
+      row.querySelectorAll('[name]').forEach(function (el) { el.name = el.name.replace('__i__', next); });
+      next += 1;
+      rows.appendChild(row);
+      row.querySelector('input[type="text"]').focus();
+      changed();
+    });
+    rows.addEventListener('click', function (e) {
+      var remove = e.target.closest('[data-remove]');
+      if (!remove) return;
+      remove.closest('.requirement-row').remove();
+      changed();
+    });
+  });
 </script>
 {% endblock %}

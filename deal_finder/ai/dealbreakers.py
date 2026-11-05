@@ -13,14 +13,15 @@ against "more than 32 GB of RAM"): with reasoning on it ran past the 120s timeou
 timeout lets the listing through -- and with reasoning off the photos drowned out the
 "8 GB" in the text and it answered PASS. Text-only got all of them right in ~5s.
 
-Whether photos are looked at at all is the watch's own "use photos" switch, not the
-model's call. The model used to say itself whether a photo could settle a line, which
+Whether photos are looked at at all is each requirement's own "use photos" switch, not
+the model's call. The model used to say itself whether a photo could settle a line, which
 saved up to 10 photo calls (~16s each, live) per listing for things like "free
 supercharging" -- but it also said no for the RAM of a Mac mini whose box, in the
 photos, read "16GB unified memory" (live, gemma4:12b), and the listing passed "> 31 GB
-RAM". With the switch off, a line the text doesn't settle gets the benefit of the doubt.
+RAM". With the switch off, a requirement the text doesn't settle gets the benefit of the
+doubt.
 
-Each line of the requirements is one requirement, judged on its own, and the first FAIL
+Each requirement (one box in the watch form) is judged on its own, and the first FAIL
 ends the check. Judged together, the model mixed them up: "must be green and have free
 supercharging" against a listing saying only "green" came back "FAIL: no free
 supercharging" (live, gemma4:12b, every time) -- a real match silently dropped.
@@ -31,8 +32,10 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from collections.abc import Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
+from typing import NamedTuple
 
 import httpx
 
@@ -154,22 +157,30 @@ def _ask(client: OllamaClient, system: str, content) -> tuple[str, str]:
     return _verdict(_chat(client, system, content))
 
 
+class Requirement(NamedTuple):
+    """One non-negotiable, and whether photos may settle it when the text doesn't."""
+
+    text: str
+    use_photos: bool = True
+
+
 def requirement_lines(requirements: str) -> list[str]:
-    """The separate requirements in a watch's non-negotiables text: one per line."""
+    """The separate requirements in a non-negotiables text: one per line."""
     return [line.strip() for line in (requirements or "").splitlines() if line.strip()]
 
 
 def check_non_negotiables(
-    client: OllamaClient, listing: Listing, requirements: str, *, use_photos: bool = True
+    client: OllamaClient, listing: Listing, requirements: str | Iterable[Requirement]
 ) -> tuple[bool, str | None]:
     """Return (passes, reason). ``reason`` is only set when ``passes`` is False.
 
-    Every line of ``requirements`` is checked on its own, in order, and the first FAIL
-    rejects the listing without checking the rest. All of them are judged from the text
-    first; photos are only looked at afterwards, for the ones the text left open -- so a
-    FAIL any line's text shows never waits behind photo calls for another line. Without
-    ``use_photos`` nothing is downloaded and the text's answer is final. A FAIL seen in
-    the photos says which ones: "from photos 1–3: the box says 16 GB of memory".
+    ``requirements``: one Requirement each, or a plain text with one per line (each may
+    use photos). Every one is checked on its own, in order, and the first FAIL rejects
+    the listing without checking the rest. All of them are judged from the text first;
+    photos are only looked at afterwards, for the ones the text left open that may use
+    them -- so a FAIL any requirement's text shows never waits behind photo calls for
+    another. One that may not use photos is settled by the text alone. A FAIL seen in the
+    photos says which ones: "from photos 1–3: the box says 16 GB of memory".
 
     Fails OPEN: if the requirements text is blank, or the AI call itself fails/errors
     (model down, timeout, unreadable answer, ...), this returns ``(True, None)`` -- an AI
@@ -177,7 +188,9 @@ def check_non_negotiables(
     app's "AI never blocks" principle everywhere else. (Logged, so it isn't silent.)
     A requirement neither the text nor the photos settle gets the benefit of the doubt.
     """
-    lines = requirement_lines(requirements)
+    if isinstance(requirements, str):
+        requirements = [Requirement(line) for line in requirement_lines(requirements)]
+    lines = [Requirement(text.strip(), use_photos) for text, use_photos in requirements if text.strip()]
     if not lines:
         return True, None
 
@@ -202,7 +215,7 @@ def check_non_negotiables(
 
     try:
         open_lines: list[tuple[str, str]] = []  # (requirement, what the text doesn't say)
-        for requirement in lines:
+        for requirement, use_photos in lines:
             kind, detail = _ask(client, _TEXT_SYSTEM, facts(requirement))
             if kind == "FAIL":
                 return False, detail or f"doesn't meet: {requirement}"

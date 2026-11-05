@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 from starlette.concurrency import run_in_threadpool
 
+from ..categories.fields import non_negotiables
 from ..config import EDITABLE_KEYS
 from ..db import get_session, load_setting_overrides, runtime_settings
 from ..languages import SUPPORTED_LANGUAGES
@@ -18,13 +19,13 @@ from ..progress import get_status
 from ..registry import get_category, list_adapters, list_categories
 from ..scheduler import next_run_time
 from ..site_categories import category_adapters, effective_id, form_choices, stale_keys
-from ..util import localtime, to_bool
+from ..util import localtime
 from .. import service
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["localtime"] = localtime  # every timestamp on the pages, in local time
-templates.env.filters["to_bool"] = to_bool  # a checkbox field's stored value
+templates.env.globals["non_negotiables"] = non_negotiables  # a requirements field's boxes
 
 
 def _get_watch_or_404(session: Session, watch_id: int) -> Watch:
@@ -46,13 +47,19 @@ def _parse_watch_form(form) -> dict:
             filters[key[2:]] = form.get(key)
         elif key.startswith("sitecat_"):
             site_choices[key[8:]] = form.get(key)
-    # A browser doesn't submit an unticked box at all: store it as "false", not as missing
-    # (which reads as the field's default).
+    # Non-negotiables: a numbered box each (<name>_text_<i>) with its own "use photos" box
+    # (<name>_photos_<i>) -- numbered because a browser doesn't submit an unticked box at
+    # all. Empty boxes are dropped.
     category = get_category(form.get("category", "car"))
     for f in category.filter_fields if category else []:
-        if f.kind == "checkbox":
-            filters[f.name] = "true" if f"f_{f.name}" in form else "false"
-    questions =[q.strip() for q in form.get("questions", "").splitlines() if q.strip()]
+        if f.kind == "requirements":
+            prefix = f"{f.name}_text_"
+            rows = sorted(int(k[len(prefix):]) for k in form if k.startswith(prefix) and k[len(prefix):].isdigit())
+            filters[f.name] = [
+                {"text": form.get(f"{prefix}{i}"), "photos": f"{f.name}_photos_{i}" in form}
+                for i in rows if form.get(f"{prefix}{i}", "").strip()
+            ]
+    questions = [q.strip() for q in form.get("questions", "").splitlines() if q.strip()]
     data = {
         "name": form.get("name", "").strip() or "Untitled watch",
         "category": form.get("category", "car"),
