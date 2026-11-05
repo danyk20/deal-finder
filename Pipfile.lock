@@ -75,11 +75,11 @@
         },
         "autouncle-scraper": {
             "hashes": [
-                "sha256:2ba2c64e277c5744956ec937785109930f91b6dca21300d969e19435cccae99e",
-                "sha256:4bfa16a68af070d3731bcb0dbba768e5f75eeedc29016877e405fb885688a824"
+                "sha256:464a2d73ac16b4654e9f8c326bc958cce4ecc5a08ae70f700ab7094b94c6bcbf",
+                "sha256:4871c35632d9e53d676d8ac326f503c74313f6c5fdb35154f749c2b79fb74231"
             ],
             "markers": "python_version >= '3.13'",
-            "version": "==0.4.1"
+            "version": "==0.4.2"
         },
         "beautifulsoup4": {
             "hashes": [

@@ -54,7 +54,10 @@ dependencies = [
     # merging). >=0.4.1 fixes this properly upstream: scrape() now fills gaps in each
     # detail record from its own search-phase record, so plain scrape() keeps
     # modelVariant regardless of detail=True/False.
-    "autouncle-scraper>=0.4.1",
+    # >=0.4.2: AutoUncle's car_search_form/config (make/model list) answers 401 unless
+    # called with its current "?cv=<version>" param, which 0.4.2 reads from the search
+    # page's own preload link -- before, every AutoUncle search failed with that 401.
+    "autouncle-scraper>=0.4.2",
 ]
 
 [project.optional-dependencies]
