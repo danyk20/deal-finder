@@ -46,6 +46,12 @@ def test_listing_from_api_item_real_fixture():
     assert li.image_urls and li.image_urls[0].startswith("https://listing-images.autoscout24.ch/")
 
 
+def test_listing_from_api_item_keeps_who_publishes_the_ad():
+    li = listing_from_api_item(_FIXTURE[0])  # real payload: a private seller in Lindau
+    assert (li.attributes["seller_name"], li.attributes["seller_type"]) == ("Claudio", "private")
+    assert li.location == "8312 Lindau"
+
+
 def test_listing_from_api_item_infers_dual_motor_from_version_name():
     """Regression: some AutoScout24 listings have `driveType: null` even though the
     Tesla trim name itself ("90 D", "P100D", ...) unambiguously means dual-motor AWD --

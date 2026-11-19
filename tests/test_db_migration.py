@@ -103,3 +103,23 @@ def test_migration_is_a_noop_on_a_fresh_database(tmp_path, monkeypatch):
     finally:
         config_module.get_settings.cache_clear()
         db_module._engine = None
+
+
+def test_migration_adds_car_key_to_seen_listings_as_empty(tmp_path):
+    """Listings seen before car_key existed have none: they only count as that very ad seen."""
+    engine = _old_schema_engine(tmp_path)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE seenlisting (id INTEGER PRIMARY KEY, watch_id INTEGER NOT NULL, "
+            "marketplace TEXT NOT NULL, external_id TEXT NOT NULL)"
+        )
+        conn.exec_driver_sql("INSERT INTO seenlisting VALUES (1, 1, 'autoscout24', '20708998')")
+    _migrate_schema(engine)
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT car_key FROM seenlisting WHERE id=1").scalar_one() == ""
+
+
+def test_migration_skips_a_table_that_does_not_exist_yet(tmp_path):
+    engine = _old_schema_engine(tmp_path)  # no seenlisting table: create_all() makes it whole
+    _migrate_schema(engine)
+    assert _columns(engine, "seenlisting") == set()

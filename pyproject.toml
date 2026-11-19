@@ -17,6 +17,9 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "tenacity>=8.2",
+    # Photo fingerprints: telling a dealer's ads of one used car on two portals (same
+    # photos, resized and re-encoded by each) from a very similar car -- see same_car.py.
+    "pillow>=13.0",
     # AutoScout24.ch: calls the site's own public, unauthenticated JSON API directly
     # (api.autoscout24.ch) — no browser or anti-bot bypass needed for that adapter.
     "autoscout24-scraper>=0.1.0",

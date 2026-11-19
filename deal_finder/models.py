@@ -76,6 +76,9 @@ class SeenListing(SQLModel, table=True):
     url: str = ""
     title: str = ""
     price: Optional[float] = None
+    # A used car's same_car.CarFacts as JSON ("" if it isn't one), so a dealer's ad of the
+    # same car on another portal counts as seen too.
+    car_key: str = ""
     notified: bool = False
     first_seen_at: datetime = Field(default_factory=utcnow)
     notified_at: Optional[datetime] = None

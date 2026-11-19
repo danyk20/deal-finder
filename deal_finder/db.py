@@ -40,6 +40,7 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("watch", "telegram_chat_id", "TEXT NOT NULL DEFAULT ''"),
     ("notificationlog", "channel", "TEXT NOT NULL DEFAULT 'email'"),
     ("watch", "site_categories", "JSON NOT NULL DEFAULT '{}'"),
+    ("seenlisting", "car_key", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 
@@ -49,7 +50,8 @@ def _migrate_schema(engine) -> None:
     with engine.begin() as conn:
         for table, column, ddl in _MIGRATIONS:
             existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
-            if column not in existing:
+            # No such table (yet): create_all() makes it with every column.
+            if existing and column not in existing:
                 conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 

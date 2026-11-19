@@ -169,6 +169,13 @@ def _build_attributes(item: dict, version: str = "") -> dict[str, Any]:
     teaser = (item.get("teaser") or "").strip()
     if teaser:
         attrs["teaser"] = teaser
+    # Who publishes the ad (search results only; a single ad has just a seller id) --
+    # also how same_car.py tells a dealer's ads of one car on two portals from two cars.
+    seller = item.get("seller") if isinstance(item.get("seller"), dict) else {}
+    if seller.get("name"):
+        attrs["seller_name"] = seller["name"]
+    if seller.get("type"):
+        attrs["seller_type"] = seller["type"]  # "professional" / "private"
 
     return attrs
 

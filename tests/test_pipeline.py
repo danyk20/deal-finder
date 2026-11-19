@@ -9,6 +9,7 @@ from deal_finder import pipeline
 from deal_finder.adapters.base import MarketplaceQuery
 from deal_finder.config import Settings
 from deal_finder.models import SeenListing, Watch
+from deal_finder.same_car import CarFacts, car_facts
 
 
 def _mk_watch(session, marketplaces=("demo",), seed_done=False):
@@ -612,3 +613,156 @@ def test_aggregator_listing_keeps_its_own_data_linking_to_the_original_ad(sessio
     res = pipeline.run_watch(session, w, settings=settings, notify=False, ignore_seen=True)
     [m] = res.matches_preview
     assert (m["marketplace"], m["external_id"], m["url"], m["via"]) == ("agg", "1", original_url, None)
+
+
+# --- a dealer's ads of the same used car on two portals -------------------------------
+
+
+def _car(marketplace, i, *, title=None, location="6030 Ebikon- Luzern", colour="black", **kw):
+    """The same used car (2017, 177'900 km, CHF 19'900, 525 PS, electric, automatic)
+    whichever marketplace lists it."""
+    from deal_finder.adapters.base import Listing
+
+    return Listing(
+        marketplace=marketplace, external_id=str(i), url=f"https://{marketplace}/{i}",
+        title=title or f"Tesla Model S {marketplace} {i}", price=19900, location=location,
+        attributes={"year": 2017, "mileage_km": 177900, "horsepower": 525, "fuel": "electric",
+                    "transmission": "automatic", "body_color": colour},
+        **kw,
+    )
+
+
+_SAME = "same year, mileage, price, postcode, power, fuel, gearbox, colour and photos"
+
+
+def _photos(monkeypatch, same=True):
+    """same_photos' answer, recording the pairs it was asked about (a list of ad links)."""
+    asked = []
+
+    def same_photos(a, b, fingerprints):
+        asked.append((a.photos, b.photos))
+        return same
+
+    monkeypatch.setattr(pipeline, "same_photos", same_photos)
+    return asked
+
+
+def _taken_first(monkeypatch, marketplace):
+    """An Event set once ``marketplace``'s listing went through the free checks."""
+    taken = threading.Event()
+    real_filter = pipeline.filter_rejection_reason
+
+    def filter_spy(li, *args, **kwargs):
+        reason = real_filter(li, *args, **kwargs)
+        if li.marketplace == marketplace:
+            taken.set()
+        return reason
+
+    monkeypatch.setattr(pipeline, "filter_rejection_reason", filter_spy)
+    return taken
+
+
+def test_aggregator_copy_of_a_car_the_portal_found_on_another_ad_is_skipped(session, monkeypatch):
+    """AutoUncle's copy comes from carmarket.ch; the dealer's AutoScout24 ad is another ad
+    of the same car, with its own ID, link and title."""
+    portal_taken = _taken_first(monkeypatch, "autoscout24")
+    _photos(monkeypatch)
+
+    def aggregator():
+        assert portal_taken.wait(timeout=5)
+        return [_car("agg", 7076654, title="Tesla Model S 100 D 2017", location="6030 Ebikon",
+                     original_url="https://carmarket.test/fahrzeug/tesla-model-s-100-d-4520703")]
+
+    _aggregator_and_portal(monkeypatch, aggregator=aggregator,
+                           portal=lambda: [_car("autoscout24", 20708998, title="TESLA Model S 100 D")])
+    w = _mk_watch(session, marketplaces=("autoscout24", "agg"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert [(m["marketplace"], m["external_id"]) for m in res.matches_preview] == [("autoscout24", "20708998")]
+    assert _rejected(res) == [
+        ("agg", "7076654", f"same car already found on Portal.ch in this run ({_SAME})"),
+    ]
+
+
+def test_a_very_similar_car_of_the_same_dealer_is_kept(session, monkeypatch):
+    asked = _photos(monkeypatch)
+    _install(monkeypatch, one=lambda: [_car("one", 1)], two=lambda: [_car("two", 2, colour="white")])
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert res.matched == 2 and res.rejected_preview == []
+    assert asked == []  # the facts already tell them apart: no photos downloaded
+
+
+@pytest.mark.parametrize("photos", ["other photos", "comparing them fails"])
+def test_same_facts_but_photos_that_dont_prove_it_keep_both(session, monkeypatch, photos):
+    if photos == "other photos":
+        asked = _photos(monkeypatch, same=False)
+    else:
+        asked = []
+
+        def same_photos(a, b, fingerprints):
+            asked.append((a.photos, b.photos))
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(pipeline, "same_photos", same_photos)
+    _install(monkeypatch, one=lambda: [_car("one", 1, image_urls=["https://one/1.jpg"])],
+             two=lambda: [_car("two", 2, image_urls=["https://two/1.jpg"])])
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert res.matched == 2 and res.rejected_preview == []
+    assert len(asked) == 1
+
+
+def test_same_year_mileage_and_price_in_two_towns_are_two_cars(session, monkeypatch):
+    _install(monkeypatch, one=lambda: [_car("one", 1)], two=lambda: [_car("two", 2, location="8554 Wigoltingen")])
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert res.matched == 2 and res.rejected_preview == []
+
+
+def test_a_copy_the_filters_reject_does_not_hide_one_they_pass(session, monkeypatch):
+    one_taken = _taken_first(monkeypatch, "one")
+
+    def two():
+        assert one_taken.wait(timeout=5)
+        return [_car("two", 2)]
+
+    _install(monkeypatch, one=lambda: [_car("one", 1, title="Tesla")], two=two)  # no "Model S"
+    w = _mk_watch(session, marketplaces=("one", "two"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert [m["marketplace"] for m in res.matches_preview] == ["two"]
+    [(marketplace, _, reason)] = _rejected(res)
+    assert marketplace == "one" and "same car" not in reason
+
+
+def test_same_car_seen_on_another_ad_before_is_skipped(session, monkeypatch):
+    asked = _photos(monkeypatch)
+    _install(monkeypatch, one=lambda: [_car("one", 1, image_urls=["https://one/1.jpg"])])
+    w = _mk_watch(session, marketplaces=("one",), seed_done=True)
+    session.add(SeenListing(watch_id=w.id, marketplace="two", external_id="2",
+                            car_key=car_facts(_car("two", 2, image_urls=["https://two/1.jpg"])).to_json(),
+                            notified=True))
+    session.commit()
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False)
+    assert res.matches_preview == []
+    assert _rejected(res) == [("one", "1", f"same car already seen on two ({_SAME})")]
+    assert asked == [(("https://one/1.jpg",), ("https://two/1.jpg",))]  # the earlier ad's photo links, kept
+
+
+def test_the_very_ad_seen_before_still_matches_but_isnt_new(session, monkeypatch):
+    _install(monkeypatch, one=lambda: [_car("one", 1)])
+    w = _mk_watch(session, marketplaces=("one",), seed_done=True)
+    session.add(SeenListing(watch_id=w.id, marketplace="one", external_id="1",
+                            car_key=car_facts(_car("one", 1)).to_json(), notified=True))
+    session.commit()
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False)
+    assert res.matched == 1 and res.new == 0 and res.rejected_preview == []
+
+
+def test_a_notified_car_is_recorded_with_its_car_key(session, monkeypatch):
+    monkeypatch.setattr(pipeline, "send_match_email", lambda *args, **kwargs: None)
+    _install(monkeypatch, one=lambda: [_car("one", 1)])
+    w = _mk_watch(session, marketplaces=("one",))
+    res = pipeline.run_watch(session, w, settings=Settings(seed_mode=False, ai_enabled=False, smtp_host="smtp.test"))
+    assert res.notified == 1
+    [row] = session.exec(select(SeenListing).where(SeenListing.watch_id == w.id)).all()
+    assert CarFacts.from_json(row.car_key) == car_facts(_car("one", 1))

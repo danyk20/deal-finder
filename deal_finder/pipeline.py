@@ -46,6 +46,7 @@ from .notify import EmailMatch, TelegramMatch, open_listings, render_email
 from .notify import send_email as send_match_email
 from .notify import send_telegram_match
 from .registry import adapter_for_url, get_adapter, get_category
+from .same_car import CarFacts, car_facts, compare, same_photos
 
 log = logging.getLogger("deal_finder.pipeline")
 
@@ -66,12 +67,22 @@ def listing_to_dict(li: Listing) -> dict[str, Any]:
     }
 
 
+def _label(marketplace: str) -> str:
+    adapter = get_adapter(marketplace)
+    return adapter.label if adapter else marketplace
+
+
 def _found_by(li: Listing) -> str:
     """Who found a listing, for "already found on ..." reasons: "AutoScout24.ch", or
     "AutoScout24.ch via AutoUncle.ch" for one fetched from an aggregator's link."""
-    adapter = get_adapter(li.marketplace)
-    label = adapter.label if adapter else li.marketplace
+    label = _label(li.marketplace)
     return f"{label} via {li.via}" if li.via else label
+
+
+def _agreeing(facts: list[str]) -> str:
+    """"same year, mileage, price, postcode, first registration, colour" -- the reason
+    then ends in " and photos"."""
+    return "same " + ", ".join(["year", "mileage", "price", *facts])
 
 
 @dataclass
@@ -175,11 +186,15 @@ class _Run:
     An aggregator's listing (AutoUncle) of an ad on another portal is skipped when that ad
     was already seen on this watch or another marketplace found it this run; else that
     portal's own adapter fetches it (from a small pool of its own, so it doesn't wait
-    behind the AI), and it's checked and shown as that portal's listing -- see
-    _from_aggregator.
+    behind the AI -- that pool also compares photos, see below), and it's checked and shown as
+    that portal's listing -- see _from_aggregator.
+
+    A dealer's ad of a used car that another of their ads (on another portal) stands for
+    already is skipped too, but only when that's certain -- same facts and same photos:
+    see _possible_copy_of and same_car.py.
     """
 
-    def __init__(self, watch, query, category, settings, ai_client, result, *, seen_keys, deliver):
+    def __init__(self, watch, query, category, settings, ai_client, result, *, seen_keys, seen_cars=(), deliver):
         self.watch = watch
         self.watch_id = watch.id
         self.query = query
@@ -188,6 +203,8 @@ class _Run:
         self.ai_client = ai_client
         self.result = result
         self.seen_keys = seen_keys
+        # (CarFacts, label of the marketplace it was seen on) of every used car seen before.
+        self.seen_cars: list[tuple[CarFacts, str]] = list(seen_cars)
         # Translate/answer (and on Telegram, send) new matches during the run -- off for
         # seeding, dry runs and previews, which never notify.
         self.deliver = deliver
@@ -207,10 +224,14 @@ class _Run:
         # (marketplace, external_id) of every listing taken this run -> who found it
         # ("AutoScout24.ch", "AutoScout24.ch via AutoUncle.ch"), for "already found" reasons.
         self._found_keys: dict[tuple[str, str], str] = {}
+        # (CarFacts, who found it) of every used car taken this run that passed the free checks.
+        self._found_cars: list[tuple[CarFacts, str]] = []
 
         self._pending: dict[Future, tuple] = {}  # future -> (handler, *handler args)
         self._ai: ThreadPoolExecutor | None = None
-        self._originals: ThreadPoolExecutor | None = None
+        # Fetches aggregators' original ads, and compares photos of possible copies of a car.
+        self._downloads: ThreadPoolExecutor | None = None
+        self._fingerprints: dict[str, int | None] = {}  # photo link -> same_car.fingerprint
         # Live status, also updated from the worker threads.
         self._lock = threading.Lock()
         self._searching: dict[str, str] = {}
@@ -223,7 +244,7 @@ class _Run:
         self._ai = ThreadPoolExecutor(
             max_workers=max(1, self.settings.ai_parallel_requests), thread_name_prefix=f"ai-{self.watch_id}"
         )
-        self._originals = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"originals-{self.watch_id}")
+        self._downloads = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"downloads-{self.watch_id}")
         try:
             for pos, (key, adapter) in enumerate(plan):
                 with self._lock:
@@ -242,7 +263,7 @@ class _Run:
             # Everything is done by now, unless a handler raised: then don't wait for the rest.
             searches.shutdown(wait=False, cancel_futures=True)
             self._ai.shutdown(wait=False, cancel_futures=True)
-            self._originals.shutdown(wait=False, cancel_futures=True)
+            self._downloads.shutdown(wait=False, cancel_futures=True)
 
     # --- handlers (calling thread) ---
 
@@ -277,8 +298,9 @@ class _Run:
                 self._take(item)
 
     def _take(self, item: _Found) -> None:
-        """A listing for this run, unless another copy of the same ad was taken already.
-        The free checks right away (no settings -> no AI); only the AI check is queued."""
+        """A listing for this run, unless another copy of the same ad was taken already, or
+        it's certainly another ad of the same car (see _possible_copy_of). The free checks
+        right away (no settings -> no AI); only the AI check is queued."""
         li = item.listing
         key = (li.marketplace, li.external_id)
         if key in self._found_keys:
@@ -288,11 +310,63 @@ class _Run:
         reason = filter_rejection_reason(li, self.query, self.category, self.watch)
         if reason is not None:
             self.rejected.append((item, reason))
-        elif self.requirements:
+            return
+        car = car_facts(li)
+        candidates = self._possible_copy_of(li, car) if car is not None else []
+        if candidates:
+            future = self._downloads.submit(self._copy_by_photos, car, candidates)
+            self._pending[future] = (self._compared_photos, item, car)
+        else:
+            self._passed(item, car)
+
+    def _passed(self, item: _Found, car: CarFacts | None) -> None:
+        """Through the free checks, and no copy of a car already taken or seen: on to the AI."""
+        if car is not None:
+            self._found_cars.append((car, _found_by(item.listing)))
+        if self.requirements:
             self._checks_queued += 1
             self._submit(self._check, item, then=self._checked)
         else:
             self._matched(item)
+
+    def _possible_copy_of(self, li: Listing, car: CarFacts) -> list[tuple[CarFacts, str]]:
+        """Used cars this one may be a copy of -- a dealer's ad of it on another portal, with
+        a different ID, link and title -- by their facts (same_car.compare): one taken this
+        run, or (unless this very ad was seen before) one seen on an earlier run. Each as
+        (its facts, the reason to skip this ad, minus "and photos" -- if they match too).
+        Only checked once a listing passes the free checks, so a copy those reject (its
+        title lacks the trim, say) doesn't hide one they'd pass; and before the AI check,
+        which would be wasted on a copy."""
+        candidates = []
+        for other, who in self._found_cars:
+            same, facts = compare(car, other)
+            if same:
+                candidates.append((other, f"same car already found on {who} in this run ({_agreeing(facts)}"))
+        if (li.marketplace, li.external_id) not in self.seen_keys:
+            for other, label in self.seen_cars:
+                same, facts = compare(car, other)
+                if same:
+                    candidates.append((other, f"same car already seen on {label} ({_agreeing(facts)}"))
+        return candidates
+
+    def _copy_by_photos(self, car: CarFacts, candidates: list[tuple[CarFacts, str]]) -> str | None:
+        """(Worker thread.) The reason to skip this ad, if its photos are the same as one
+        candidate's too -- else None: never skipped unless that's certain."""
+        for other, reason in candidates:
+            if same_photos(car, other, self._fingerprints):
+                return f"{reason} and photos)"
+        return None
+
+    def _compared_photos(self, future: Future, item: _Found, car: CarFacts) -> None:
+        try:
+            reason = future.result()
+        except Exception:  # noqa: BLE001 - can't tell: keep it
+            log.exception("watch %s: comparing photos of %s failed", self.watch_id, item.listing.url)
+            reason = None
+        if reason is None:
+            self._passed(item, car)
+        else:
+            self.rejected.append((item, reason))
 
     def _from_aggregator(self, item: _Found) -> None:
         """An aggregator's listing (AutoUncle) of an ad on another portal: skipped if that
@@ -312,7 +386,7 @@ class _Run:
                 self.rejected.append((item, f"already found on {self._found_keys[key]} in this run"))
                 return
             if _adapter_enabled(adapter.key, self.settings):
-                future = self._originals.submit(adapter.fetch_listing, li.original_url, self.settings)
+                future = self._downloads.submit(adapter.fetch_listing, li.original_url, self.settings)
                 self._pending[future] = (self._fetched_original, item, adapter)
                 return
         self._take(_Found(item.order, get_adapter(li.marketplace).with_original(li, None)))
@@ -469,6 +543,7 @@ def _run_watch(
 
     # Which listings were already seen (notified, or recorded by seeding) for this watch?
     seen_keys: set[tuple[str, str]] = set()
+    seen_cars: list[tuple[CarFacts, str]] = []
     if not ignore_seen:
         for row in session.exec(select(SeenListing).where(SeenListing.watch_id == watch.id)).all():
             seen_keys.add((row.marketplace, row.external_id))
@@ -476,11 +551,13 @@ def _run_watch(
             # also counts as that ad seen on its portal, should that portal find it later.
             if (portal := adapter_for_url(row.url)) is not None:
                 seen_keys.add((portal[0].key, portal[1]))
+            if (car := CarFacts.from_json(row.car_key or "")) is not None:
+                seen_cars.append((car, _label(row.marketplace)))
     is_seed = record and settings.seed_mode and not watch.seed_done
 
     run = _Run(
         watch, query, category, settings, ai_client, result,
-        seen_keys=seen_keys, deliver=notify and not dry_run and not is_seed,
+        seen_keys=seen_keys, seen_cars=seen_cars, deliver=notify and not dry_run and not is_seed,
     )
     run.run(_plan(watch, result, settings))
 
@@ -613,6 +690,7 @@ def _record_seen(session: Session, watch: Watch, li: Listing, *, notified: bool)
         url=li.url,
         title=li.title,
         price=li.price,
+        car_key=car.to_json() if (car := car_facts(li)) is not None else "",
         notified=notified,
         notified_at=utcnow() if notified else None,
     )
