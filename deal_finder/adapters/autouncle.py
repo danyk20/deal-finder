@@ -1,7 +1,8 @@
 """AutoUncle.ch adapter — uses the `autouncle-scraper` PyPI package
 (https://pypi.org/project/autouncle-scraper/), which parses schema.org JSON-LD (for
 unfiltered searches) plus a filtered-search RSC/GraphQL path — no login, no browser.
-AutoUncle explicitly marks its listing data CC BY 4.0.
+AutoUncle declares CC BY 4.0 only on its search pages' model-level price-trend data now;
+its listing pages stopped declaring a license in 2026-11 (see autouncle-scraper 0.4.3).
 
 ``detail=True`` is effectively mandatory: as soon as ANY price/mileage/year filter is
 set (true of almost every real watch), the search summary alone has no fuel type/

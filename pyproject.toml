@@ -42,7 +42,8 @@ dependencies = [
     "autolina-scraper>=0.3.1",
     # AutoUncle.ch: parses schema.org JSON-LD (unfiltered search) plus a filtered-search
     # RSC/GraphQL path via the autouncle-scraper package -- no browser needed. AutoUncle
-    # marks its listing data CC BY 4.0. Requires Python >=3.13 (see requires-python above
+    # declares CC BY 4.0 only on its search pages' model-level price-trend data now, not on
+    # its listing pages (since 2026-11). Requires Python >=3.13 (see requires-python above
     # -- this, not just the facebook extra, now needs that floor).
     # >=0.3.0 required: max_results only caps the detail-fetch phase's *request cost*
     # from that version onward -- 0.1.0 had no cap at all (a single popular model can
@@ -57,7 +58,13 @@ dependencies = [
     # >=0.4.2: AutoUncle's car_search_form/config (make/model list) answers 401 unless
     # called with its current "?cv=<version>" param, which 0.4.2 reads from the search
     # page's own preload link -- before, every AutoUncle search failed with that 401.
-    "autouncle-scraper>=0.4.2",
+    # >=0.4.3: AutoUncle changed its listing pages (the listing is typed ["Car","Product"]
+    # now), and every detail fetch -- so every search here -- failed with "No Vehicle
+    # JSON-LD object found on detail page". First-seen/last-updated dates are date-only now.
+    # >=0.4.4: AutoUncle's search cards now carry the trim ("100 D") only as rendered text,
+    # so every title lost it and a trim watch ("Model S100D") matched nothing; 0.4.4 reads
+    # it back out of the card.
+    "autouncle-scraper>=0.4.4",
 ]
 
 [project.optional-dependencies]
