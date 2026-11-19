@@ -124,6 +124,15 @@ def test_listing_from_api_node_handles_missing_fields():
     assert li.image_urls == []
 
 
+def test_listing_from_api_node_skips_a_listing_that_could_not_be_loaded(caplog):
+    """0.2.4+: a page that still failed after the scraper's network retries comes back
+    with only its search-page fields plus `error` -- too little for the AI checks."""
+    node = {"id": "1", "title": "Tesla Model X", "url": "https://www.ricardo.ch/de/a/1/", "price": 32000,
+            "error": "Page.goto: NS_ERROR_UNKNOWN_HOST"}
+    assert listing_from_api_node(node) is None
+    assert "https://www.ricardo.ch/de/a/1/" in caplog.text and "NS_ERROR_UNKNOWN_HOST" in caplog.text
+
+
 # --- search() orchestration ---------------------------------------------------
 
 
@@ -165,6 +174,16 @@ def test_search_happy_path(monkeypatch):
     listings = list(RicardoAdapter().search(_query()))
     assert len(listings) == 1
     assert listings[0].external_id == "1"
+
+
+def test_search_keeps_the_listings_that_loaded(monkeypatch):
+    nodes = [
+        {"id": "1", "title": "Tesla Model X 100D", "price": 32000, "description": "Top Zustand"},
+        {"id": "2", "title": "Tesla Model X 90D", "price": 29000, "error": "Page.goto: NS_ERROR_UNKNOWN_HOST"},
+        {"id": "3", "title": "Tesla Model X P90D", "price": 31000, "description": "Gepflegt"},
+    ]
+    monkeypatch.setattr(ricardo, "scrape", lambda text, **kwargs: _result(nodes))
+    assert [li.external_id for li in RicardoAdapter().search(_query())] == ["1", "3"]
 
 
 def test_search_bad_price_range_raises_adapter_error(monkeypatch):

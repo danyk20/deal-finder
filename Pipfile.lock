@@ -1203,11 +1203,11 @@
         },
         "ricardo-scraper": {
             "hashes": [
-                "sha256:49e6a6a0d2b88c331ff9f39223faaffbeec2575aedfad050027e2f3d858e7565",
-                "sha256:c7c6f3aca3fddd2fa04342955ac66a3f0ff0cd2de213acd02f9ba16376137993"
+                "sha256:122dd57aa78483f147842ede2996a3dacec2a971cb12e6d6a1350716861305c6",
+                "sha256:a45e7a4cb726cef507d4bd1722939475125f309e96eb8e59b200e263bb0b6c81"
             ],
             "markers": "python_version >= '3.11'",
-            "version": "==0.2.3"
+            "version": "==0.2.4"
         },
         "screeninfo": {
             "hashes": [

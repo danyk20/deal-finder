@@ -92,7 +92,15 @@ def _build_attributes(node: dict, text_blob: str) -> dict[str, Any]:
 
 def listing_from_api_node(node: dict) -> Listing | None:
     """Map one ricardo-scraper listing record to a Listing. Pure + fixture-testable
-    without any network access."""
+    without any network access.
+
+    A record with an ``error`` (0.2.4+: its page still didn't load after the scraper's
+    own network retries) is skipped: it only has the search-page fields, so the AI checks
+    and notification would run on almost nothing -- and it skipped the category filter.
+    It isn't marked seen, so the next run tries it again."""
+    if node.get("error"):
+        log.warning("Ricardo listing %s could not be loaded: %s", node.get("url"), node["error"])
+        return None
     ext = node.get("id")
     title = (node.get("title") or "").strip()
     if not ext or not title:

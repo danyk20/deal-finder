@@ -31,7 +31,10 @@ dependencies = [
     # dict per listing, plus top-level `color`/`model` fields -- all previously fetched
     # internally (as part of the __NEXT_DATA__ blob every detail visit already pulls)
     # but silently discarded before reaching callers.
-    "ricardo-scraper>=0.2.3",
+    # >=0.2.4: a short network error (e.g. "Page.goto: NS_ERROR_UNKNOWN_HOST") is retried
+    # per listing page instead of aborting the run and losing every listing fetched so
+    # far; a page that still fails comes back with an `error` field (the adapter skips it).
+    "ricardo-scraper>=0.2.4",
     # Autolina.ch: parses the site's server-rendered HTML directly (autolina.ch) via the
     # autolina-scraper package — mirrors autoscout24-scraper's design/signatures, but no
     # public JSON API is involved; plain requests, no browser needed for this adapter.
