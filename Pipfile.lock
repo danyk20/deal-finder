@@ -1393,11 +1393,11 @@
         },
         "tutti-scraper": {
             "hashes": [
-                "sha256:69cbe3cefafd1bad4701b39b0e78557a8da5a10de7812fbc0a3f25e050c69cbb",
-                "sha256:d757e13f018ad8bddb9018387ea5cd5fbe6cfea95356284ed0b92b9265b0e9cf"
+                "sha256:865dca8d6eaf3e1e1d602eae4795ac4892a6bc3537047c3bee43259787f50a86",
+                "sha256:d97a2561ad5500277b58488b4c4cf0161e3d4682083b3cf5df9b7e62e52f9e36"
             ],
             "markers": "python_version >= '3.11'",
-            "version": "==0.3.1"
+            "version": "==0.3.3"
         },
         "typing-extensions": {
             "hashes": [
