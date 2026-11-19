@@ -67,7 +67,10 @@ dependencies = [
     # >=0.4.4: AutoUncle's search cards now carry the trim ("100 D") only as rendered text,
     # so every title lost it and a trim watch ("Model S100D") matched nothing; 0.4.4 reads
     # it back out of the card.
-    "autouncle-scraper>=0.4.4",
+    # >=0.4.5: `sourceUrl`, the original ad on its portal (autoscout24.ch, autolina.ch, ...)
+    # -- the pipeline fetches it with that portal's own adapter, or skips it when another
+    # marketplace already found it (see pipeline._Run._from_aggregator).
+    "autouncle-scraper>=0.4.5",
 ]
 
 [project.optional-dependencies]

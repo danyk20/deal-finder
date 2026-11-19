@@ -227,3 +227,15 @@ def test_health_check(monkeypatch):
 
     monkeypatch.setattr(autolina, "scrape", boom)
     assert AutolinaAdapter().health_check() is False
+
+
+@pytest.mark.parametrize("url, expected", [
+    ("https://www.autolina.ch/auto/tesla-model-s/5191221", "5191221"),  # as AutoUncle gives it
+    ("https://www.autolina.ch/vehicles/tesla-model-s/5191221", "5191221"),  # where autolina.ch redirects
+    ("https://www.autolina.ch/auto/tesla-model-s", None),
+    ("https://www.autoscout24.ch/de/d/20919059", None),
+])
+def test_listing_id_from_url(url, expected):
+    from deal_finder.adapters.autolina import AutolinaAdapter
+
+    assert AutolinaAdapter().listing_id_from_url(url) == expected

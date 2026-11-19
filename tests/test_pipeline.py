@@ -475,3 +475,140 @@ def test_email_matches_are_enriched_during_the_run_and_sent_in_order(session, mo
     res = pipeline.run_watch(session, w, settings=Settings(seed_mode=False, ai_enabled=False, smtp_host="smtp.test"))
     assert res.emailed is True and res.notified == 2
     assert sent[0].index("Tesla Model S one 1") < sent[0].index("Tesla Model S two 1")
+
+
+# --- an aggregator's listing (AutoUncle) of an ad on another portal -----------------
+
+
+_AD = "https://portal.test/ad/7"
+
+
+def _aggregator_and_portal(monkeypatch, *, aggregator, portal=lambda: [], fetch=None):
+    """An aggregator ("agg") whose listings link to ads on a portal. The portal takes the
+    AutoScout24 slot, so its "enabled in Settings" switch is adapter_autoscout24_enabled.
+    Returns the list of ad links the portal was asked to fetch."""
+    import re
+
+    from deal_finder import registry
+    from deal_finder.adapters.base import BaseAdapter
+
+    fetched = []
+
+    class Portal(BaseAdapter):
+        key, label, supported_categories = "autoscout24", "Portal.ch", {"car"}
+
+        def search(self, query, settings=None):
+            return portal()
+
+        def listing_id_from_url(self, url):
+            m = re.match(r"https://portal\.test/ad/(\d+)$", url or "")
+            return m.group(1) if m else None
+
+        def fetch_listing(self, url, settings=None):
+            fetched.append(url)
+            if fetch is not None:
+                return fetch(url)
+            return _tesla("autoscout24", int(self.listing_id_from_url(url)), description="the portal's own text")
+
+    class Aggregator(BaseAdapter):
+        key, label, supported_categories = "agg", "Agg.ch", {"car"}
+
+        def search(self, query, settings=None):
+            return aggregator()
+
+    monkeypatch.setitem(registry.ADAPTERS, "autoscout24", Portal())
+    monkeypatch.setitem(registry.ADAPTERS, "agg", Aggregator())
+    return fetched
+
+
+def _via_aggregator(i=1, original_url=_AD):
+    return _tesla("agg", i, original_url=original_url, location="8259 Kaltenbach")
+
+
+def _rejected(res):
+    return [(r["marketplace"], r["external_id"], r["reason"]) for r in res.rejected_preview]
+
+
+def test_aggregator_listing_is_fetched_from_its_portal(session, monkeypatch):
+    """Even when the watch doesn't search that portal itself."""
+    fetched = _aggregator_and_portal(monkeypatch, aggregator=lambda: [_via_aggregator()])
+    w = _mk_watch(session, marketplaces=("agg",))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert fetched == [_AD]
+    [m] = res.matches_preview
+    assert (m["marketplace"], m["external_id"], m["via"]) == ("autoscout24", "7", "Agg.ch")
+    assert m["location"] == "8259 Kaltenbach"  # the portal's copy had none
+
+
+def test_aggregator_listing_the_portal_found_this_run_is_skipped_unfetched(session, monkeypatch):
+    portal_taken = threading.Event()
+    real_filter = pipeline.filter_rejection_reason
+
+    def filter_spy(li, *args, **kwargs):
+        if li.marketplace == "autoscout24":
+            portal_taken.set()
+        return real_filter(li, *args, **kwargs)
+
+    def aggregator():
+        assert portal_taken.wait(timeout=5), "the portal's listing was never taken"
+        return [_via_aggregator()]
+
+    monkeypatch.setattr(pipeline, "filter_rejection_reason", filter_spy)
+    fetched = _aggregator_and_portal(monkeypatch, aggregator=aggregator, portal=lambda: [_tesla("autoscout24", 7)])
+    w = _mk_watch(session, marketplaces=("autoscout24", "agg"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert fetched == []
+    assert [(m["marketplace"], m["external_id"], m["via"]) for m in res.matches_preview] == [("autoscout24", "7", None)]
+    assert _rejected(res) == [("agg", "1", "already found on Portal.ch in this run")]
+
+
+def test_portal_finding_an_ad_already_fetched_via_the_aggregator_keeps_it_once(session, monkeypatch):
+    fetched_once = threading.Event()
+
+    def fetch(url):
+        fetched_once.set()
+        return _tesla("autoscout24", 7)
+
+    def portal():
+        assert fetched_once.wait(timeout=5)
+        return [_tesla("autoscout24", 7)]
+
+    _aggregator_and_portal(monkeypatch, aggregator=lambda: [_via_aggregator()], portal=portal, fetch=fetch)
+    w = _mk_watch(session, marketplaces=("autoscout24", "agg"))
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False, ignore_seen=True)
+    assert len(res.matches_preview) == 1 and res.matches_preview[0]["external_id"] == "7"
+    [(marketplace, external_id, reason)] = _rejected(res)
+    assert (marketplace, external_id) == ("autoscout24", "7") and reason.startswith("already found on Portal.ch")
+
+
+@pytest.mark.parametrize("seen_as", [
+    ("autoscout24", "7", "https://portal.test/ad/7"),  # found by the portal's own search before
+    ("agg", "9", _AD),  # kept with the aggregator's data before, linking to the ad
+])
+def test_aggregator_listing_already_seen_on_the_portal_is_skipped_unfetched(session, monkeypatch, seen_as):
+    fetched = _aggregator_and_portal(monkeypatch, aggregator=lambda: [_via_aggregator()])
+    w = _mk_watch(session, marketplaces=("agg",), seed_done=True)
+    marketplace, external_id, url = seen_as
+    session.add(SeenListing(watch_id=w.id, marketplace=marketplace, external_id=external_id, url=url, notified=True))
+    session.commit()
+    res = pipeline.run_watch(session, w, settings=Settings(ai_enabled=False), notify=False)
+    assert fetched == [] and res.matches_preview == []
+    assert _rejected(res) == [("agg", "1", "already seen on Portal.ch")]
+
+
+@pytest.mark.parametrize("case", ["no adapter for the portal", "fetch fails", "portal off in Settings"])
+def test_aggregator_listing_keeps_its_own_data_linking_to_the_original_ad(session, monkeypatch, case):
+    from deal_finder.adapters.base import AdapterError
+
+    original_url = "https://elsewhere.test/ad/9" if case == "no adapter for the portal" else _AD
+
+    def fetch(url):
+        raise AdapterError("Portal.ch request failed: down")
+
+    _aggregator_and_portal(monkeypatch, aggregator=lambda: [_via_aggregator(original_url=original_url)],
+                           fetch=fetch if case == "fetch fails" else None)
+    settings = Settings(ai_enabled=False, adapter_autoscout24_enabled=case != "portal off in Settings")
+    w = _mk_watch(session, marketplaces=("agg",))
+    res = pipeline.run_watch(session, w, settings=settings, notify=False, ignore_seen=True)
+    [m] = res.matches_preview
+    assert (m["marketplace"], m["external_id"], m["url"], m["via"]) == ("agg", "1", original_url, None)

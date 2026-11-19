@@ -51,6 +51,15 @@ def get_adapter(key: str) -> BaseAdapter | None:
     return ADAPTERS.get(key)
 
 
+def adapter_for_url(url: str | None) -> tuple[BaseAdapter, str] | None:
+    """The marketplace a link to an ad belongs to, and the ad's ``external_id`` there --
+    or None if no adapter recognises it (see BaseAdapter.listing_id_from_url)."""
+    for adapter in ADAPTERS.values():
+        if url and (listing_id := adapter.listing_id_from_url(url)):
+            return adapter, listing_id
+    return None
+
+
 def adapters_for_category(category_key: str, *, include_internal: bool = False) -> list[BaseAdapter]:
     return [
         a

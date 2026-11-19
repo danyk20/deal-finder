@@ -7,6 +7,7 @@ change — the pipeline, matching engine, and web UI all work in terms of these 
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -55,6 +56,13 @@ class Listing:
     posted_at: datetime | None = None
     attributes: dict[str, Any] = field(default_factory=dict)  # year, mileage_km, fuel, ...
     image_urls: list[str] = field(default_factory=list)
+    # An aggregator's listing (AutoUncle) links to the ad on the portal it comes from: the
+    # pipeline fetches that ad with the portal's own adapter, or skips it if another
+    # marketplace already found it (see pipeline._Run._from_aggregator).
+    original_url: str | None = None
+    # Label of the aggregator a listing was found through, e.g. "AutoUncle" -- shown next
+    # to its marketplace ("autoscout24 via AutoUncle").
+    via: str | None = None
 
     def content_hash(self) -> str:
         """Stable short hash of the fields that matter for "did this listing change?"."""
@@ -147,3 +155,25 @@ class BaseAdapter:
         by ``parent_id``). Empty = this marketplace/scraper doesn't support a category
         filter, so the AI category pick is skipped for it and it searches as before."""
         return []
+
+    def listing_id_from_url(self, url: str) -> str | None:
+        """The ``external_id`` this marketplace's listings get for a link to one of its
+        ads, or None if the link isn't one -- so an ad an aggregator links to is
+        recognised as the one this marketplace finds itself, whatever form the link has."""
+        return None
+
+    def fetch_listing(self, url: str, settings: Settings | None = None) -> Listing | None:
+        """One ad, by its link, mapped the way search() maps it -- or None if this
+        marketplace can't fetch single ads, or the page had nothing to map. Raises
+        AdapterError when the request itself fails."""
+        return None
+
+    def with_original(self, listing: Listing, original: Listing | None) -> Listing:
+        """For an aggregator: what to use for one of its listings, given ``original`` --
+        the same ad, fetched from its own portal (None: no adapter here for that portal,
+        or the fetch failed). That listing, marked as found via this one, with this one's
+        location where a single ad's data has none (AutoScout24's has a seller id only);
+        else this one, linking to the original ad."""
+        if original is None:
+            return dataclasses.replace(listing, url=listing.original_url or listing.url)
+        return dataclasses.replace(original, via=self.label, location=original.location or listing.location)

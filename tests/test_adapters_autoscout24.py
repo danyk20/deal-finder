@@ -207,3 +207,38 @@ def test_health_check(monkeypatch):
 
     monkeypatch.setattr(as24, "resolve_make_key", boom)
     assert AutoScout24Adapter().health_check() is False
+
+
+# --- an ad an aggregator (AutoUncle) links to ------------------------------------
+
+
+@pytest.mark.parametrize("url, expected", [
+    ("https://www.autoscout24.ch/de/d/tesla-model-s-20919059", "20919059"),  # as AutoUncle gives it
+    ("https://www.autoscout24.ch/de/d/20919059", "20919059"),  # as this adapter's listings have it
+    ("https://autoscout24.ch/fr/d/tesla-model-s-90-d-20919059?source=x", "20919059"),
+    ("https://www.autoscout24.ch/de/s/mo-model-s/mk-tesla", None),  # a search, not an ad
+    ("https://www.autolina.ch/auto/tesla-model-s/5191221", None),
+    ("", None),
+])
+def test_listing_id_from_url(url, expected):
+    assert AutoScout24Adapter().listing_id_from_url(url) == expected
+
+
+def test_fetch_listing_maps_the_ads_detail_record(monkeypatch):
+    item = dict(_FIXTURE[0])
+    item.pop("seller", None)  # the detail endpoint has a seller id only
+    asked = []
+    monkeypatch.setattr(as24, "fetch_detail", lambda session, listing_id: asked.append(listing_id) or dict(item))
+    li = AutoScout24Adapter().fetch_listing(f"https://www.autoscout24.ch/de/d/tesla-model-s-{item['id']}")
+    assert asked == [item["id"]]
+    assert li.marketplace == "autoscout24" and li.external_id == str(item["id"])
+    assert li.url == f"https://www.autoscout24.ch/de/d/{item['id']}" and li.location is None
+
+
+def test_fetch_listing_request_failure_raises_adapter_error(monkeypatch):
+    def boom(session, listing_id):
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(as24, "fetch_detail", boom)
+    with pytest.raises(AdapterError, match="request failed"):
+        AutoScout24Adapter().fetch_listing("https://www.autoscout24.ch/de/d/1")

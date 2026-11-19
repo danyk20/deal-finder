@@ -30,3 +30,12 @@ def test_adapters_for_category_hides_internal_by_default():
 def test_get_adapter_still_resolves_demo():
     """Hidden from listings, but a watch that already references it must keep working."""
     assert registry.get_adapter("demo") is not None
+
+
+def test_adapter_for_url_finds_the_ads_marketplace_and_id():
+    adapter, ad_id = registry.adapter_for_url("https://www.autoscout24.ch/de/d/tesla-model-s-20919059")
+    assert (adapter.key, ad_id) == ("autoscout24", "20919059")
+    adapter, ad_id = registry.adapter_for_url("https://www.autolina.ch/auto/tesla-model-s/5191221")
+    assert (adapter.key, ad_id) == ("autolina", "5191221")
+    assert registry.adapter_for_url("https://carmarket.ch/de/fahrzeug/tesla-model-s-70-d-4566798") is None
+    assert registry.adapter_for_url(None) is None

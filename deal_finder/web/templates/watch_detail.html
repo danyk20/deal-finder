@@ -124,7 +124,7 @@
         <td data-sort="{{ m.price if m.price is not none else '' }}">{{ "%.0f"|format(m.price) ~ ' ' ~ m.currency if m.price else '—' }}</td>
         <td data-sort="{{ m.year if m.year is not none else '' }}">{{ m.year or '—' }}</td>
         <td data-sort="{{ m.mileage_km if m.mileage_km is not none else '' }}">{{ m.mileage_km or '—' }}</td>
-        <td>{{ m.location or '—' }}</td><td>{{ m.marketplace }}</td>
+        <td>{{ m.location or '—' }}</td><td>{{ m.marketplace }}{% if m.via %} <small class="muted">via {{ m.via }}</small>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -163,7 +163,7 @@
   {% for m in run_result.rejected_preview %}
     <tr>
       <td><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title }}</a></td>
-      <td>{{ m.marketplace }}</td>
+      <td>{{ m.marketplace }}{% if m.via %} <small class="muted">via {{ m.via }}</small>{% endif %}</td>
       <td>{{ m.reason }}</td>
     </tr>
   {% endfor %}

@@ -23,6 +23,7 @@ marketing text -- ``Listing.title`` is always just the vehicle identity.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -32,6 +33,12 @@ from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
 
 log = logging.getLogger("deal_finder.adapters.autolina")
+
+# An ad's link: /auto/<slug>/<carId>, which autolina.ch now redirects to
+# /vehicles/<slug>/<carId>. No fetch_listing(): as of 2026-11 its ad pages can't be read
+# (autolina-scraper 0.3.1 finds only the photos there), and a single ad's page lacks
+# the make/model/price its search results carry.
+_AD_URL_RE = re.compile(r"^https?://(?:www\.)?autolina\.ch/(?:auto|vehicles)/[^/?#]+/(\d+)(?:[/?#]|$)")
 
 # Detail-page fields renamed to clearer, stable attribute keys. autolina.ch's spec rows
 # are scraped generically (label text -> slugified column, see autolina_scraper.htmlparse)
@@ -198,6 +205,10 @@ class AutolinaAdapter(BaseAdapter):
             raise AdapterError(f"Autolina.ch request failed: {exc}") from exc
 
         return [li for item in result.listings if (li := listing_from_api_item(item)) is not None]
+
+    def listing_id_from_url(self, url: str) -> str | None:
+        m = _AD_URL_RE.match(url or "")
+        return m.group(1) if m else None
 
     def health_check(self) -> bool:
         try:

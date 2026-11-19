@@ -45,7 +45,7 @@ from .models import NotificationLog, SeenListing, Watch, utcnow
 from .notify import EmailMatch, TelegramMatch, open_listings, render_email
 from .notify import send_email as send_match_email
 from .notify import send_telegram_match
-from .registry import get_adapter, get_category
+from .registry import adapter_for_url, get_adapter, get_category
 
 log = logging.getLogger("deal_finder.pipeline")
 
@@ -62,7 +62,16 @@ def listing_to_dict(li: Listing) -> dict[str, Any]:
         "year": li.attributes.get("year"),
         "mileage_km": li.attributes.get("mileage_km"),
         "posted_at": li.posted_at.isoformat() if li.posted_at else None,
+        "via": li.via,
     }
+
+
+def _found_by(li: Listing) -> str:
+    """Who found a listing, for "already found on ..." reasons: "AutoScout24.ch", or
+    "AutoScout24.ch via AutoUncle.ch" for one fetched from an aggregator's link."""
+    adapter = get_adapter(li.marketplace)
+    label = adapter.label if adapter else li.marketplace
+    return f"{label} via {li.via}" if li.via else label
 
 
 @dataclass
@@ -162,6 +171,12 @@ class _Run:
 
     A listing found on several marketplaces is still kept once, but now as whichever copy
     passed its checks first rather than the one from the marketplace listed first.
+
+    An aggregator's listing (AutoUncle) of an ad on another portal is skipped when that ad
+    was already seen on this watch or another marketplace found it this run; else that
+    portal's own adapter fetches it (from a small pool of its own, so it doesn't wait
+    behind the AI), and it's checked and shown as that portal's listing -- see
+    _from_aggregator.
     """
 
     def __init__(self, watch, query, category, settings, ai_client, result, *, seen_keys, deliver):
@@ -189,9 +204,13 @@ class _Run:
         self.sent: list[_Found] = []  # Telegram: delivered
         self.send_error: str | None = None
         self._match_keys: set = set()
+        # (marketplace, external_id) of every listing taken this run -> who found it
+        # ("AutoScout24.ch", "AutoScout24.ch via AutoUncle.ch"), for "already found" reasons.
+        self._found_keys: dict[tuple[str, str], str] = {}
 
         self._pending: dict[Future, tuple] = {}  # future -> (handler, *handler args)
         self._ai: ThreadPoolExecutor | None = None
+        self._originals: ThreadPoolExecutor | None = None
         # Live status, also updated from the worker threads.
         self._lock = threading.Lock()
         self._searching: dict[str, str] = {}
@@ -204,6 +223,7 @@ class _Run:
         self._ai = ThreadPoolExecutor(
             max_workers=max(1, self.settings.ai_parallel_requests), thread_name_prefix=f"ai-{self.watch_id}"
         )
+        self._originals = ThreadPoolExecutor(max_workers=2, thread_name_prefix=f"originals-{self.watch_id}")
         try:
             for pos, (key, adapter) in enumerate(plan):
                 with self._lock:
@@ -222,6 +242,7 @@ class _Run:
             # Everything is done by now, unless a handler raised: then don't wait for the rest.
             searches.shutdown(wait=False, cancel_futures=True)
             self._ai.shutdown(wait=False, cancel_futures=True)
+            self._originals.shutdown(wait=False, cancel_futures=True)
 
     # --- handlers (calling thread) ---
 
@@ -250,15 +271,64 @@ class _Run:
 
         for i, li in enumerate(found):
             item = _Found((pos, i), li)
-            # The free checks right away (no settings -> no AI); only the AI check is queued.
-            reason = filter_rejection_reason(li, self.query, self.category, self.watch)
-            if reason is not None:
-                self.rejected.append((item, reason))
-            elif self.requirements:
-                self._checks_queued += 1
-                self._submit(self._check, item, then=self._checked)
+            if li.original_url:
+                self._from_aggregator(item)
             else:
-                self._matched(item)
+                self._take(item)
+
+    def _take(self, item: _Found) -> None:
+        """A listing for this run, unless another copy of the same ad was taken already.
+        The free checks right away (no settings -> no AI); only the AI check is queued."""
+        li = item.listing
+        key = (li.marketplace, li.external_id)
+        if key in self._found_keys:
+            self.rejected.append((item, f"already found on {self._found_keys[key]} in this run"))
+            return
+        self._found_keys[key] = _found_by(li)
+        reason = filter_rejection_reason(li, self.query, self.category, self.watch)
+        if reason is not None:
+            self.rejected.append((item, reason))
+        elif self.requirements:
+            self._checks_queued += 1
+            self._submit(self._check, item, then=self._checked)
+        else:
+            self._matched(item)
+
+    def _from_aggregator(self, item: _Found) -> None:
+        """An aggregator's listing (AutoUncle) of an ad on another portal: skipped if that
+        ad was already seen on this watch or found by another marketplace this run; else
+        fetched by the portal's own adapter, if it's enabled in Settings -- even when the
+        watch doesn't search that marketplace itself. Without one (or if it can't fetch
+        single ads), the aggregator's own data is used, linking to the original ad."""
+        li = item.listing
+        portal = adapter_for_url(li.original_url)
+        if portal is not None:
+            adapter, ad_id = portal
+            key = (adapter.key, ad_id)
+            if key in self.seen_keys:
+                self.rejected.append((item, f"already seen on {adapter.label}"))
+                return
+            if key in self._found_keys:
+                self.rejected.append((item, f"already found on {self._found_keys[key]} in this run"))
+                return
+            if _adapter_enabled(adapter.key, self.settings):
+                future = self._originals.submit(adapter.fetch_listing, li.original_url, self.settings)
+                self._pending[future] = (self._fetched_original, item, adapter)
+                return
+        self._take(_Found(item.order, get_adapter(li.marketplace).with_original(li, None)))
+
+    def _fetched_original(self, future: Future, item: _Found, adapter) -> None:
+        """The portal's own copy of an aggregator's listing arrived. A failed fetch keeps
+        the aggregator's data. If the portal's own search found the ad meanwhile, _take
+        drops this copy."""
+        li = item.listing
+        try:
+            original = future.result()
+        except Exception as exc:  # noqa: BLE001 - AdapterError or anything else: keep the aggregator's data
+            log.warning("watch %s: couldn't fetch %s from %s (%s); using %s's data",
+                        self.watch_id, li.original_url, adapter.label, exc, li.marketplace)
+            original = None
+        self._take(_Found(item.order, get_adapter(li.marketplace).with_original(li, original)))
 
     def _checked(self, future: Future, item: _Found) -> None:
         self._checks_done += 1
@@ -398,15 +468,14 @@ def _run_watch(
     )
 
     # Which listings were already seen (notified, or recorded by seeding) for this watch?
-    if ignore_seen:
-        seen_keys: set[tuple[str, str]] = set()
-    else:
-        seen_keys = {
-            (row.marketplace, row.external_id)
-            for row in session.exec(
-                select(SeenListing).where(SeenListing.watch_id == watch.id)
-            ).all()
-        }
+    seen_keys: set[tuple[str, str]] = set()
+    if not ignore_seen:
+        for row in session.exec(select(SeenListing).where(SeenListing.watch_id == watch.id)).all():
+            seen_keys.add((row.marketplace, row.external_id))
+            # An aggregator's listing kept with its own data links to the original ad: it
+            # also counts as that ad seen on its portal, should that portal find it later.
+            if (portal := adapter_for_url(row.url)) is not None:
+                seen_keys.add((portal[0].key, portal[1]))
     is_seed = record and settings.seed_mode and not watch.seed_done
 
     run = _Run(

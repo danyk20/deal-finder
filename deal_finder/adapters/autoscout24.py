@@ -23,7 +23,15 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from autoscout24_scraper import make_session, resolve_make_key, resolve_model_key, search_listings, visit_all_listings
+from autoscout24_scraper import (
+    fetch_detail,
+    listing_url,
+    make_session,
+    resolve_make_key,
+    resolve_model_key,
+    search_listings,
+    visit_all_listings,
+)
 
 from ..config import Settings, get_settings
 from .base import AdapterError, BaseAdapter, Listing, MarketplaceQuery
@@ -32,6 +40,10 @@ log = logging.getLogger("deal_finder.adapters.autoscout24")
 
 # Image "key" values from the API need this CDN host prefixed to become a real URL.
 AS24_IMG_BASE = "https://listing-images.autoscout24.ch/"
+
+# An ad's link: /de/d/<id>, or with a slug as AutoUncle gives it,
+# /de/d/tesla-model-s-20919059 -- the id is the trailing number either way.
+_AD_URL_RE = re.compile(r"^https?://(?:www\.)?autoscout24\.ch/(?:[a-z]{2}/)?d/(?:[^/?#]*-)?(\d+)(?:[/?#]|$)")
 
 
 def _name(v: Any) -> str:
@@ -245,6 +257,23 @@ class AutoScout24Adapter(BaseAdapter):
             detailed = capped
 
         return [li for item in detailed if (li := listing_from_api_item(item)) is not None]
+
+    def listing_id_from_url(self, url: str) -> str | None:
+        m = _AD_URL_RE.match(url or "")
+        return m.group(1) if m else None
+
+    def fetch_listing(self, url: str, settings: Settings | None = None) -> Listing | None:
+        """The ad's detail record, as visit_all_listings() gives it. It has the seller's
+        id only -- the town/zip come from the search results -- so its location is empty."""
+        listing_id = self.listing_id_from_url(url)
+        if listing_id is None:
+            return None
+        try:
+            item = fetch_detail(make_session(), int(listing_id))
+        except Exception as exc:  # noqa: BLE001 - requests.RequestException / HTTPError etc.
+            raise AdapterError(f"AutoScout24.ch request failed: {exc}") from exc
+        item["url"] = listing_url(int(listing_id))
+        return listing_from_api_item(item)
 
     def health_check(self) -> bool:
         try:

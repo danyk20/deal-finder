@@ -36,6 +36,7 @@ AutoUncle's own search returns" -- not confirmed newest-first (unlike Autolina's
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from collections.abc import Iterable
@@ -118,7 +119,18 @@ _SKIP_KEYS = {
     "itemCondition", "availability",
     "addressCountry", "addressLocality", "addressRegion", "postalCode",
     "datasetLicense", "datasetIsAccessibleForFree",
+    # sourceUrl (0.4.5+, the original ad on its portal) becomes Listing.original_url.
+    # sourceRedirectUrl is AutoUncle's tracked click-out to it -- possibly a paid click --
+    # so it's never kept, let alone followed.
+    "sourceUrl", "sourceRedirectUrl",
 }
+
+# AutoUncle's own price evaluation, kept (prefixed "autouncle_") on the listing fetched
+# from the ad's own portal -- see AutoUncleAdapter.with_original.
+_EVALUATION_KEYS = (
+    "price_rating", "estimated_market_price_chf", "savings_vs_market_chf", "previousPriceChf",
+    "price_change_percent", "price_history", "days_on_market", "first_seen_at", "last_updated_at",
+)
 
 
 def _build_attributes(item: dict) -> dict[str, Any]:
@@ -174,6 +186,7 @@ def listing_from_api_item(item: dict) -> Listing | None:
         location=location,
         attributes=_build_attributes(item),
         image_urls=list(images),
+        original_url=item.get("sourceUrl") or None,
     )
 
 
@@ -211,6 +224,18 @@ class AutoUncleAdapter(BaseAdapter):
             raise AdapterError(f"AutoUncle.ch request failed: {exc}") from exc
 
         return [li for item in result.listings if (li := listing_from_api_item(item)) is not None]
+
+    def with_original(self, listing: Listing, original: Listing | None) -> Listing:
+        """Also keeps AutoUncle's price evaluation ("Superpreis", market value, price
+        history, ...) on the portal's listing."""
+        merged = super().with_original(listing, original)
+        if original is None:
+            return merged
+        attributes = dict(merged.attributes)
+        for key in _EVALUATION_KEYS:
+            if listing.attributes.get(key) not in (None, ""):
+                attributes[f"autouncle_{key}"] = listing.attributes[key]
+        return dataclasses.replace(merged, attributes=attributes)
 
     @staticmethod
     def _scrape_with_model_fallback(make: str, model: str, scrape_kwargs: dict[str, Any]):

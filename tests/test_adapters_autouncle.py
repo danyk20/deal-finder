@@ -297,3 +297,40 @@ def test_health_check(monkeypatch):
 
     monkeypatch.setattr(autouncle, "resolve_make_key", boom)
     assert AutoUncleAdapter().health_check() is False
+
+
+# --- the original ad on its own portal (0.4.5+: sourceUrl) ------------------------
+
+
+def test_listing_from_api_item_links_the_original_ad_but_never_the_click_out():
+    item = {**_FIXTURE[0], "sourceUrl": "https://www.autoscout24.ch/de/d/tesla-model-s-20919059",
+            "sourceRedirectUrl": "https://www.autouncle.ch/de-ch/das_wiedersehen/autoscout24-ch/1/2"}
+    li = listing_from_api_item(item)
+    assert li.original_url == "https://www.autoscout24.ch/de/d/tesla-model-s-20919059"
+    assert "sourceUrl" not in li.attributes and "sourceRedirectUrl" not in li.attributes
+    assert li.url != item["sourceRedirectUrl"]
+
+
+def test_with_original_keeps_autouncles_evaluation_and_location():
+    from deal_finder.adapters.base import Listing
+
+    au = Listing("autouncle", "7229244", "https://www.autouncle.ch/de-ch/d/7229244", "Tesla Model S 90 D 2016",
+                 price=17900, location="8259 Kaltenbach", original_url="https://www.autoscout24.ch/de/d/x-20919059",
+                 attributes={"price_rating": "Superpreis", "estimated_market_price_chf": 23100, "mileage_km": 180000})
+    original = Listing("autoscout24", "20919059", "https://www.autoscout24.ch/de/d/20919059", "TESLA Model S 90 D",
+                       price=17900, attributes={"mileage_km": 180000, "fuel": "Elektro"})
+    li = AutoUncleAdapter().with_original(au, original)
+    assert (li.marketplace, li.external_id, li.url, li.via) == (
+        "autoscout24", "20919059", "https://www.autoscout24.ch/de/d/20919059", "AutoUncle.ch")
+    assert li.location == "8259 Kaltenbach"  # AutoScout24's single-ad data has no town
+    assert li.attributes == {"mileage_km": 180000, "fuel": "Elektro", "autouncle_price_rating": "Superpreis",
+                             "autouncle_estimated_market_price_chf": 23100}
+
+
+def test_with_original_without_one_keeps_autouncles_data_linking_to_the_original_ad():
+    from deal_finder.adapters.base import Listing
+
+    au = Listing("autouncle", "1", "https://www.autouncle.ch/de-ch/d/1", "Tesla Model S 70 D 2016",
+                 original_url="https://carmarket.ch/de/fahrzeug/tesla-model-s-70-d-4566798")
+    li = AutoUncleAdapter().with_original(au, None)
+    assert (li.marketplace, li.url, li.via) == ("autouncle", "https://carmarket.ch/de/fahrzeug/tesla-model-s-70-d-4566798", None)
